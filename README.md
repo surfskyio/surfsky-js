@@ -47,7 +47,9 @@ import { Surfsky } from "surfsky";
 // or new Surfsky({ apiToken: "...", baseUrl: "..." }) instead of env vars
 await using client = new Surfsky();
 // starts a session, stops it when the block ends so it doesn't keep billing
-await using browser = await client.browser({ proxy: { tier: "premium", country: "us" } });
+await using browser = await client.browser({
+  proxy: { tier: "premium", country: "us" },
+});
 await browser.goto("https://duckduckgo.com", { waitUntil: "domcontentloaded" });
 await browser.type('[name="q"]', "surfsky cloud browser");
 await browser.click("#searchbox_homepage button[type=submit]");
@@ -125,7 +127,8 @@ If you need more control, write your own loop on top of the pool:
 
 ```ts
 await using pool = await client.browsers();
-await pool.lease(async (browser) => {   // waits for a free browser
+await pool.lease(async (browser) => {
+  // waits for a free browser
   await browser.goto("https://example.com");
   console.log(await browser.title());
 });
@@ -179,12 +182,14 @@ built-in pools:
 import { ProxyCycle, ProxyTemplate } from "surfsky";
 
 proxy = { tier: "premium", country: "us", region: "ny", type: "mobile" }; // Surfsky premium
-proxy = { tier: "shared", country: "us" };                               // Surfsky shared, for tests
-proxy = { country: "de" };                                               // premium if set up, else shared
-proxy = "socks5://user:pass@host:1080";                                  // your own
-proxy = new ProxyCycle(myProxies);                                       // round-robin over your own list
-proxy = new ProxyTemplate("http://user-sessid-{session}:pw@gate.example.com:7000");
-proxy = async () => pickOne();                                           // any function, sync or async
+proxy = { tier: "shared", country: "us" }; // Surfsky shared, for tests
+proxy = { country: "de" }; // premium if set up, else shared
+proxy = "socks5://user:pass@host:1080"; // your own
+proxy = new ProxyCycle(myProxies); // round-robin over your own list
+proxy = new ProxyTemplate(
+  "http://user-sessid-{session}:pw@gate.example.com:7000",
+);
+proxy = async () => pickOne(); // any function, sync or async
 ```
 
 `client.proxies` lists available countries, regions and cities, plus your quota.
@@ -407,45 +412,6 @@ Live tests start real sessions and bill your account:
 ```sh
 SURFSKY_LIVE_TESTS=1 SURFSKY_API_TOKEN=... SURFSKY_API_BASE_URL=... bun run test:live
 ```
-
-## Releasing
-
-One-time, GitHub:
-
-```sh
-gh repo create surfskyio/surfsky-js --public --source=. --remote=origin --push
-```
-
-CI (`.github/workflows/ci.yml`) then runs on every push and PR: lint, typecheck,
-tests and a build on Node 22, 24 and 26, plus the same on Bun.
-
-One-time, npm: publishing runs from `.github/workflows/release.yml` with
-`--provenance` and no npm token, so it needs [trusted
-publishing](https://docs.npmjs.com/trusted-publishers) configured for the
-package — repository `surfskyio/surfsky-js`, workflow `release.yml`,
-environment `npm`. That page only exists once the package does, so publish the
-first version by hand (`npm login && bun run build && npm publish --access
-public`) and wire up the trusted publisher after. The alternative is a granular
-access token in the repo as `NPM_TOKEN`, with `NODE_AUTH_TOKEN:
-${{ secrets.NPM_TOKEN }}` added to the publish step.
-
-The `npm` environment is also where a required reviewer goes, if a release
-should wait for an approval.
-
-Every release after that is a tag:
-
-```sh
-# bump "version" in package.json first
-bun run check && bun run build
-git commit -am "release: v0.1.0"
-git tag v0.1.0
-git push origin main --tags
-```
-
-The workflow refuses to publish when the tag and `package.json` disagree, then
-runs `bun run check`, builds, imports `dist/index.js` once to prove the bundle
-loads, and publishes. `files` limits the tarball to `dist/`, `README.md`,
-`LICENSE` and `package.json` - check it with `npm pack --dry-run`.
 
 ## License
 
