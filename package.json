@@ -1,0 +1,64 @@
+{
+  "name": "surfsky",
+  "version": "0.0.1",
+  "description": "TypeScript SDK for the Surfsky antidetect browser cloud.",
+  "keywords": [
+    "surfsky",
+    "antidetect",
+    "browser",
+    "automation",
+    "scraping",
+    "cdp",
+    "devtools-protocol"
+  ],
+  "homepage": "https://surfsky.io",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/surfskyio/surfsky-js.git"
+  },
+  "bugs": {
+    "url": "https://github.com/surfskyio/surfsky-js/issues"
+  },
+  "license": "MIT",
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "dist"
+  ],
+  "sideEffects": false,
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "build": "tsdown",
+    "typecheck": "tsc --noEmit",
+    "lint": "biome check .",
+    "format": "biome check --write .",
+    "test": "vitest run",
+    "test:live": "SURFSKY_LIVE_TESTS=1 vitest run tests/live.test.ts",
+    "check": "bun run lint && bun run typecheck && bun run test",
+    "prepublishOnly": "bun run check && bun run build"
+  },
+  "devDependencies": {
+    "@arethetypeswrong/cli": "^0.18.5",
+    "@biomejs/biome": "^2.5.12",
+    "@types/node": "^26.4.1",
+    "@types/selenium-webdriver": "^4.35.6",
+    "playwright-core": "^1.62.1",
+    "publint": "^0.3.24",
+    "puppeteer-core": "^25.10.0",
+    "selenium-webdriver": "^4.48.0",
+    "tsdown": "^0.22.14",
+    "typescript": "^7.0.2",
+    "vitest": "^4.1.11"
+  },
+  "dependencies": {
+    "zod": "^4.5.4"
+  }
+}

@@ -1,0 +1,48 @@
+import { expect, test } from "vitest";
+import * as surfsky from "../src/index.js";
+
+test("the public surface", () => {
+  expect(Object.keys(surfsky).sort()).toEqual([
+    "APIConnectionError",
+    "APIError",
+    "APITimeoutError",
+    "Account",
+    "Actions",
+    "AuthenticationError",
+    "BadRequestError",
+    "Browser",
+    "BrowserPool",
+    "BrowserTimeoutError",
+    "CDPClient",
+    "CDPError",
+    "CapturedResponse",
+    "ConfigurationError",
+    "ConflictError",
+    "Extensions",
+    "Fingerprints",
+    "ForbiddenError",
+    "Keyboard",
+    "MonthlySessionLimitError",
+    "Mouse",
+    "NotFoundError",
+    "Page",
+    "PageClosedError",
+    "PaymentRequiredError",
+    "PremiumTrafficLimitError",
+    "Profiles",
+    "Proxies",
+    "ProxyCycle",
+    "ProxyRandom",
+    "ProxyTemplate",
+    "RESOURCE_TYPES",
+    "RateLimitError",
+    "ServerError",
+    "SharedTrafficLimitError",
+    "StopRun",
+    "Surfsky",
+    "SurfskyError",
+    "VERSION",
+    "ValidationError",
+  ]);
+  expect(surfsky.VERSION).toMatch(/^\d+\.\d+\.\d+/);
+});
