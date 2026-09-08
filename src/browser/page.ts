@@ -22,6 +22,10 @@ export const DIALOG_DELAY: readonly [number, number] = [600, 1400];
 
 const FUNCTION = /^\s*(async\s+)?(function\b|\([^()]*\)\s*=>|[\w$]+\s*=>)/;
 
+function asXPath(s: string): string | undefined {
+  return /^\s*(xpath=|\/\/|\.\.)/.test(s) ? s.trim().replace(/^xpath=/, "") : undefined;
+}
+
 const SELECT = `(selector, value, label) => {
   const el = document.querySelector(selector);
   if (!el) return null;
@@ -684,6 +688,8 @@ export class Page extends Actions {
 
   async count(selector: string): Promise<number> {
     const document = await this.send("DOM.getDocument", { depth: 0 });
+    const xpath = asXPath(selector);
+    if (xpath !== undefined) return (await this.#search(xpath)).length;
     const found = await this.send("DOM.querySelectorAll", {
       nodeId: document.root.nodeId,
       selector,
@@ -743,11 +749,30 @@ export class Page extends Actions {
 
   async #nodeId(selector: string): Promise<number | undefined> {
     const document = await this.send("DOM.getDocument", { depth: 0 });
+    const xpath = asXPath(selector);
+    if (xpath !== undefined) return (await this.#search(xpath))[0];
     const found = await this.send("DOM.querySelector", {
       nodeId: document.root.nodeId,
       selector,
     });
     return found.nodeId || undefined;
+  }
+
+  async #search(query: string): Promise<number[]> {
+    const { searchId, resultCount = 0 } = await this.send("DOM.performSearch", {
+      query,
+    });
+    try {
+      if (!resultCount) return [];
+      const got = await this.send("DOM.getSearchResults", {
+        searchId,
+        fromIndex: 0,
+        toIndex: resultCount,
+      });
+      return got.nodeIds ?? [];
+    } finally {
+      await this.send("DOM.discardSearchResults", { searchId }).catch(() => undefined);
+    }
   }
 
   /** Wait until the URL contains the fragment. Returns the URL. */

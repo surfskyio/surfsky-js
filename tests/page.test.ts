@@ -381,6 +381,25 @@ describe("reading", () => {
     );
   });
 
+  test("an XPath goes through the search domain, not querySelector", async () => {
+    const { browser, chrome } = await start();
+    chrome.respond("DOM.performSearch", (p) => ({
+      searchId: "s",
+      resultCount: p.query === "//h2" ? 0 : 2,
+    }));
+    chrome.respond("DOM.getSearchResults", () => ({ nodeIds: [5, 6] }));
+    chrome.respond("DOM.discardSearchResults", () => ({}));
+    chrome.respond("DOM.getBoxModel", () => ({ model: { width: 80, height: 20 } }));
+    chrome.respond("DOM.getOuterHTML", () => ({ outerHTML: "<h1>Hi</h1>" }));
+    await browser.waitForSelector("//h1", { timeout: 500 });
+    expect(await browser.outerHtml("xpath=//h1")).toBe("<h1>Hi</h1>");
+    expect(await browser.count("..//p")).toBe(2);
+    expect(await browser.outerHtml("//h2")).toBeNull();
+    const methods = chrome.calls.map((c) => c.method);
+    expect(methods).not.toContain("DOM.querySelector");
+    expect(methods).not.toContain("DOM.querySelectorAll");
+  });
+
   test("waitForSelector, isVisible", async () => {
     const { browser, chrome } = await start();
     let present = false;

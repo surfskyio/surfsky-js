@@ -282,6 +282,10 @@ waits for one of its own and throws `RateLimitError` only if it has none.
 
 ### Reading
 
+`selector` is CSS, or XPath when it starts with `//`, `..` or `xpath=`. XPath
+covers the DOM reads below and `screenshot({ selector })`; `innerText`,
+`allInnerTexts`, `selectOption` and the input methods take CSS only.
+
 | Method                                                       | Description                                                                             |
 | ------------------------------------------------------------ | --------------------------------------------------------------------------------------- |
 | `url()`, `title()`                                           | Current URL and title.                                                                  |
