@@ -43,18 +43,6 @@ test("selector actions map to Human.* with camelCase options", async () => {
   ]);
 });
 
-test("type clicks then types, fill triple-clicks first", async () => {
-  const page = new Recorder();
-  expect(await page.type("#q", "hello")).toEqual({ sent: "Human.type" });
-  await page.fill("#q", "over");
-  expect(page.calls).toEqual([
-    ["Human.click", { selector: "#q" }],
-    ["Human.type", { text: "hello" }],
-    ["Human.click", { selector: "#q", clickCount: 3 }],
-    ["Human.type", { text: "over" }],
-  ]);
-});
-
 test("keyboard and mouse", async () => {
   const page = new Recorder();
   await page.keyboard.type("x");

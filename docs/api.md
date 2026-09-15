@@ -85,8 +85,8 @@ and `hover` also take `waitForVisible`, `scrollIntoView`, `preDelay`,
 | `click(selector, { button, clickCount, modifiers })` | `button`: `left`, `right`, `middle`. `modifiers`: `Alt`, `Control`, `Meta`, `Shift`. Waits up to 30s for the element. |
 | `dblclick(selector, ...)` | Double-click. |
 | `hover(selector)` | Move the mouse over it. |
-| `type(selector, text)` | Click, then type after the existing text. |
-| `fill(selector, text)` | Select the existing text, then type over it. |
+| `type(selector, text)` | Click, then type after the existing text. Throws when the click did not focus the element. |
+| `fill(selector, text)` | Select the existing text, then type over it; `""` clears. Throws when the click did not focus the element. |
 | `selectOption(selector, value)` / `selectOption(selector, { label })` | Pick an `<option>` by value or label. Returns the value. |
 | `scroll({ deltaX, deltaY, duration })` | Animated scroll. |
 | `scrollIntoView(selector, { behavior })`, `scrollTo({ x, y, behavior })` | `behavior`: `smooth`, `instant`. |

@@ -134,16 +134,6 @@ export abstract class Actions {
     return this.send("Human.moveTo", cdpParams({ selector, ...options }));
   }
 
-  async type(selector: string, text: string): Promise<any> {
-    await this.click(selector);
-    return this.keyboard.type(text);
-  }
-
-  async fill(selector: string, text: string): Promise<any> {
-    await this.click(selector, { clickCount: 3 });
-    return this.keyboard.type(text);
-  }
-
   scroll(options: ScrollOptions = {}): Promise<any> {
     return this.send("Human.scroll", cdpParams({ ...options }));
   }

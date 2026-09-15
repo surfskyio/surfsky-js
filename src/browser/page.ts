@@ -675,6 +675,29 @@ export class Page extends Actions {
     );
   }
 
+  async type(selector: string, text: string): Promise<any> {
+    await this.click(selector);
+    await this.#validateFocus(selector);
+    return this.keyboard.type(text);
+  }
+
+  async fill(selector: string, text: string): Promise<any> {
+    await this.click(selector, { clickCount: 3 });
+    await this.#validateFocus(selector);
+    // nothing typed leaves the selection in place
+    if (text === "") return this.keyboard.press("Backspace");
+    return this.keyboard.type(text);
+  }
+
+  async #validateFocus(selector: string): Promise<void> {
+    // Human.type goes to the focused element, which is wherever the click landed
+    const focused = await this.evaluate(
+      "s => document.activeElement === document.querySelector(s)",
+      { args: [selector] },
+    );
+    if (!focused) throw new Error(`'${selector}' did not take focus`);
+  }
+
   async getAttribute(selector: string, name: string): Promise<string | null> {
     const nodeId = await this.#nodeId(selector);
     if (nodeId === undefined) return null;

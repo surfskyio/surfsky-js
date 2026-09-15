@@ -323,6 +323,36 @@ describe("evaluate", () => {
   });
 });
 
+describe("input", () => {
+  test("type and fill check that the click took focus", async () => {
+    const { browser, chrome } = await start();
+    let focused = true;
+    chrome.respond("Runtime.evaluate", () => ({
+      result: { type: "boolean", value: focused },
+    }));
+    await browser.type("#q", "hi");
+    await browser.fill("#q", "hello");
+    await browser.fill("#q", "");
+    expect(chrome.called("Human.click").map((c) => c.params)).toEqual([
+      { selector: "#q" },
+      { selector: "#q", clickCount: 3 },
+      { selector: "#q", clickCount: 3 },
+    ]);
+    expect(chrome.called("Human.type").map((c) => c.params)).toEqual([
+      { text: "hi" },
+      { text: "hello" },
+    ]);
+    // the selection, nothing typed over it
+    expect(chrome.called("Human.press").map((c) => c.params)).toEqual([
+      { key: "Backspace" },
+    ]);
+    expect(chrome.called("Runtime.evaluate")).toHaveLength(3);
+    focused = false; // an overlay took the click
+    await expect(browser.fill("#q", "hello")).rejects.toThrow("'#q' did not take focus");
+    expect(chrome.called("Human.type")).toHaveLength(2);
+  });
+});
+
 describe("reading", () => {
   test("text, attributes, counts, html", async () => {
     const { browser, chrome } = await start();
