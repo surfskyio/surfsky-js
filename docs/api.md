@@ -59,18 +59,33 @@ waits for one of its own and throws `RateLimitError` only if it has none.
 ## Reading
 
 `selector` is CSS, or XPath when it starts with `//`, `..` or `xpath=`. XPath
-covers the DOM reads below and `screenshot({ selector })`; `innerText`,
-`allInnerTexts`, `selectOption` and the input methods take CSS only.
+covers the DOM reads below, `screenshot({ selector })`, `innerText` and
+`selectOption`; `allInnerTexts` and the input methods take CSS only.
+
+A selector with no match in the document's light DOM is looked up again inside
+every shadow root, open or closed, at any depth, so a widget built with
+`attachShadow({mode: "closed"})` is readable. A selector cannot span a shadow
+boundary: `.inner` finds the element, `#host .inner` does not. `allInnerTexts`
+and the cloud's selector input (`click`, `dblclick`, `hover`, `scrollIntoView`,
+`type`, `fill`) stay on the main document's light DOM, so click a pierced
+element by its box:
+
+```ts
+const box = await page.boundingBox("#inside-a-shadow-root");
+if (box) await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
+```
 
 | Method | Description |
 | --- | --- |
 | `url()`, `title()` | Current URL and title. |
 | `content()` | Full HTML. |
 | `outerHtml(selector)` | HTML of the first match, `null` if none. |
-| `innerText(selector)`, `allInnerTexts(selector)` | Rendered text of the first match, or of every match. Runs script in the isolated world. |
+| `innerText(selector)` | Rendered text of the first match. Runs script on the node in the isolated world. |
+| `allInnerTexts(selector)` | Rendered text of every match. Runs one `querySelectorAll` script in the isolated world, so it sees the light DOM only. |
 | `getAttribute(selector, name)` | `null` if missing. |
 | `count(selector)` | Number of matches. |
 | `isVisible(selector)` | First match has a bounding box. |
+| `boundingBox(selector)` | `{x, y, width, height}` of the content box in page-viewport CSS pixels. `null` when nothing matches or it has no box. |
 | `waitForSelector(selector, { visible: true, timeout })` | Wait for the element, visible by default. |
 | `screenshot({ selector, fullPage, format: "png", quality })` | `Uint8Array`. Viewport, one element or the full page. `format`: `png`, `jpeg`, `webp`. |
 

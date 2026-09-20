@@ -79,6 +79,7 @@ export class FakeChrome extends FakeCDPServer {
     });
     this.respond("Page.createIsolatedWorld", () => ({ executionContextId: 7 }));
     this.respond("DOM.getDocument", () => ({ root: { nodeId: 1 } }));
+    this.respond("DOM.resolveNode", () => ({ object: { objectId: "O7" } }));
   }
 
   newTargetId(): string {
@@ -135,20 +136,19 @@ export class FakeChrome extends FakeCDPServer {
     }
   }
 
-  pauseDocument(
+  documentResponse(
     sessionId: string,
     requestId: string,
     status: number,
     frameId?: string,
   ): void {
     this.event(
-      "Fetch.requestPaused",
+      "Network.responseReceived",
       {
         requestId,
-        request: { url: "https://x.test/" },
+        type: "Document",
         frameId: frameId ?? this.sessions.get(sessionId),
-        resourceType: "Document",
-        responseStatusCode: status,
+        response: { url: "https://x.test/", status },
       },
       sessionId,
     );

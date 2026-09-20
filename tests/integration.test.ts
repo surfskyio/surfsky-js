@@ -27,7 +27,7 @@ test("client.map runs every url through the real pool, browser and CDP client", 
       }
       const loaderId = chrome.newLoaderId();
       queueMicrotask(() => {
-        chrome.pauseDocument(sessionId ?? "", `R-${loaderId}`, 200);
+        chrome.documentResponse(sessionId ?? "", `R-${loaderId}`, 200);
         chrome.lifecycle(sessionId ?? "", loaderId, [
           "init",
           "commit",

@@ -49,18 +49,20 @@ describe("connect", () => {
       url: "about:blank",
     });
     expect(browser.targetId).toBe("T1");
-    // a paused target is resumed last, after Fetch is armed
     expect(chrome.onSession("S-T1")).toEqual([
       "Page.enable",
       "Page.setLifecycleEventsEnabled",
-      "Fetch.enable",
+      "Network.enable",
       "Runtime.runIfWaitingForDebugger",
     ]);
   });
 
   test("non-web targets are resumed and let go", async () => {
     const { browser, chrome } = await start();
-    chrome.attachPage("EXT", { url: "chrome-extension://abc/bg.html", waiting: true });
+    chrome.attachPage("EXT", {
+      url: "chrome-extension://abc/bg.html",
+      waiting: true,
+    });
     chrome.attachPage("W", { type: "service_worker", waiting: false });
     await settle();
     expect(browser.pages).toHaveLength(1);
@@ -171,7 +173,7 @@ describe("pages", () => {
     expect(chrome.onSession(page._sessionId)).toEqual([
       "Page.enable",
       "Page.setLifecycleEventsEnabled",
-      "Fetch.enable",
+      "Network.enable",
       "Runtime.runIfWaitingForDebugger",
     ]);
     await page.goto("https://x.test");
@@ -222,16 +224,16 @@ describe("pages", () => {
   test("events are routed by session", async () => {
     const { browser, chrome, sessionId } = await start();
     const page = await browser.newPage();
-    chrome.pauseDocument(page._sessionId, "R1", 201);
+    chrome.documentResponse(page._sessionId, "R1", 201);
     expect(page.status).toBe(201);
     expect(browser.status).toBeUndefined();
-    chrome.pauseDocument(sessionId, "R2", 200);
+    chrome.documentResponse(sessionId, "R2", 200);
     expect(browser.status).toBe(200);
-    chrome.event("Fetch.requestPaused", { requestId: "R3" }, "S-unknown");
+    chrome.event("Fetch.requestPaused", { requestId: "R3" }, page._sessionId);
+    chrome.event("Fetch.requestPaused", { requestId: "R4" }, "S-unknown");
     await settle();
-    expect(chrome.called("Fetch.continueResponse").map((c) => c.sessionId)).toEqual([
+    expect(chrome.called("Fetch.failRequest").map((c) => c.sessionId)).toEqual([
       page._sessionId,
-      sessionId,
     ]);
   });
 });
@@ -239,7 +241,9 @@ describe("pages", () => {
 describe("lifetime", () => {
   test("a server disconnect closes every page and fails waits", async () => {
     const warned: string[] = [];
-    const { browser, chrome } = await start({ logger: { warn: (m) => warned.push(m) } });
+    const { browser, chrome } = await start({
+      logger: { warn: (m) => warned.push(m) },
+    });
     const page = await browser.newPage();
     chrome.autoNavigate = false;
     const nav = page.goto("https://x.test", { timeout: 5000 });
@@ -297,7 +301,7 @@ describe("lifetime", () => {
     await browser._endLease();
     expect(page.closed).toBe(true);
     expect(browser.pages).toEqual([browser]);
-    expect(chrome.called("Network.disable")).toHaveLength(1);
+    expect(chrome.called("Browser.getVersion")).toHaveLength(1);
     expect(browser.onDialog).toBeNull();
     expect(browser.data).toEqual({ loggedIn: true });
     expect(browser.useCount).toBe(1);
@@ -322,7 +326,9 @@ describe("options", () => {
 
   test("raw access", async () => {
     const { browser, chrome } = await start();
-    expect(await browser.cdp.send("Browser.getVersion")).toEqual({ product: "Chrome/1" });
+    expect(await browser.cdp.send("Browser.getVersion")).toEqual({
+      product: "Chrome/1",
+    });
     expect(await browser.send("Custom.method", { a: 1 })).toEqual({});
     expect(chrome.called("Custom.method")[0]).toMatchObject({
       params: { a: 1 },
@@ -347,7 +353,10 @@ describe("review follow-ups", () => {
     socket.onSend = (message) => {
       if (message.method !== "Target.detachFromTarget") original?.(message); // never answered
     };
-    chrome.attachPage("EXT", { url: "chrome-extension://abc/bg.html", waiting: false });
+    chrome.attachPage("EXT", {
+      url: "chrome-extension://abc/bg.html",
+      waiting: false,
+    });
     await settle();
     const started = Date.now();
     await browser.close();

@@ -28,6 +28,7 @@ describe("setup", () => {
     expect(chrome.onSession(sessionId)).toEqual([
       "Page.enable",
       "Page.setLifecycleEventsEnabled",
+      "Network.enable",
       "Fetch.enable",
     ]);
     expect(chrome.calls.find((c) => c.method === "Fetch.enable")?.params).toEqual({
@@ -35,24 +36,32 @@ describe("setup", () => {
         { urlPattern: "*", resourceType: "Font" },
         { urlPattern: "*", resourceType: "Image" },
         { urlPattern: "*.png" },
-        { urlPattern: "*", resourceType: "Document", requestStage: "Response" },
       ],
     });
   });
 
+  test("a page with nothing to block arms Network and not Fetch", async () => {
+    const { chrome, sessionId } = await start();
+    expect(chrome.onSession(sessionId)).toEqual([
+      "Page.enable",
+      "Page.setLifecycleEventsEnabled",
+      "Network.enable",
+    ]);
+  });
+
   test("a failed setup surfaces on the first command", async () => {
     const chrome = new FakeChrome();
-    chrome.respond("Fetch.enable", () => ({ error: { message: "nope" } }));
-    await expect(fakeBrowser({ chrome })).rejects.toThrow("Fetch.enable: nope");
+    chrome.respond("Network.enable", () => ({ error: { message: "nope" } }));
+    await expect(fakeBrowser({ chrome })).rejects.toThrow("Network.enable: nope");
     expect(chrome.socket?.closed).toBe(true);
     // a later page's failed setup surfaces on its first command instead
     const { browser, chrome: ours } = await start();
-    ours.respond("Fetch.enable", (_p, sessionId) =>
+    ours.respond("Network.enable", (_p, sessionId) =>
       sessionId === browser._sessionId ? {} : { error: { message: "nope" } },
     );
     const page = await browser.newPage().catch((e) => e);
     expect(page).toBeInstanceOf(CDPError);
-    expect(page.message).toBe("Fetch.enable: nope");
+    expect(page.message).toBe("Network.enable: nope");
   });
 });
 
@@ -72,11 +81,10 @@ describe("goto", () => {
     });
     await settle();
     expect(settled).toBe(false);
-    chrome.pauseDocument(sessionId, "R1", 404);
+    chrome.documentResponse(sessionId, "R1", 404);
     chrome.lifecycle(sessionId, "L1", ["init", "commit", "DOMContentLoaded", "load"]);
     await nav;
     expect(browser.status).toBe(404);
-    expect(chrome.onSession(sessionId, "Fetch.continueResponse")).toHaveLength(1);
     expect(chrome.calls.find((c) => c.method === "Page.navigate")?.params).toEqual({
       url: "https://x.test",
     });
@@ -114,7 +122,9 @@ describe("goto", () => {
       frameId: browser.targetId,
     }));
     await browser.goto("https://x.test", { waitUntil: "commit" });
-    const nav = browser.goto("https://x.test", { waitUntil: "domcontentloaded" });
+    const nav = browser.goto("https://x.test", {
+      waitUntil: "domcontentloaded",
+    });
     await settle();
     chrome.lifecycle(sessionId, "L1", ["init", "DOMContentLoaded"], "iframe-1");
     chrome.lifecycle(sessionId, "L1", ["init", "DOMContentLoaded"]);
@@ -135,10 +145,13 @@ describe("goto", () => {
 
   test("errorText and a second navigation", async () => {
     const { browser, chrome } = await start();
-    chrome.respond("Page.navigate", () => ({ errorText: "net::ERR_NAME_NOT_RESOLVED" }));
+    chrome.respond("Page.navigate", () => ({
+      errorText: "net::ERR_NAME_NOT_RESOLVED",
+    }));
     await expect(browser.goto("https://x.test")).rejects.toThrow(
       "navigation to https://x.test failed: net::ERR_NAME_NOT_RESOLVED",
     );
+    expect(browser.status).toBeUndefined();
     chrome.autoNavigate = false;
     chrome.respond("Page.navigate", () => ({
       loaderId: "L1",
@@ -172,7 +185,7 @@ describe("goto", () => {
 
   test("a new goto forgets the last status", async () => {
     const { browser, chrome, sessionId } = await start();
-    chrome.pauseDocument(sessionId, "R1", 200);
+    chrome.documentResponse(sessionId, "R1", 200);
     expect(browser.status).toBe(200);
     chrome.autoNavigate = false;
     browser.goto("https://x.test", { timeout: 50 }).catch(() => {});
@@ -200,19 +213,16 @@ describe("goto", () => {
 });
 
 describe("Fetch interception", () => {
-  test("blocks, lets errors through and reads only the main frame's status", async () => {
-    const { browser, chrome, sessionId } = await start({ blockResources: ["image"] });
+  test("blocks every paused request and reads only the main frame's status", async () => {
+    const { browser, chrome, sessionId } = await start({
+      blockResources: ["image"],
+    });
     chrome.event(
       "Fetch.requestPaused",
       { requestId: "R1", request: {}, resourceType: "Image" },
       sessionId,
     );
-    chrome.event(
-      "Fetch.requestPaused",
-      { requestId: "R2", request: {}, responseErrorReason: "Failed" },
-      sessionId,
-    );
-    chrome.pauseDocument(sessionId, "R3", 500, "iframe");
+    chrome.documentResponse(sessionId, "R3", 500, "iframe");
     chrome.event("Fetch.requestPaused", { request: {} }, sessionId);
     await settle();
     expect(
@@ -224,8 +234,6 @@ describe("Fetch interception", () => {
         method: "Fetch.failRequest",
         params: { requestId: "R1", errorReason: "BlockedByClient" },
       },
-      { method: "Fetch.continueRequest", params: { requestId: "R2" } },
-      { method: "Fetch.continueResponse", params: { requestId: "R3" } },
     ]);
     expect(browser.status).toBeUndefined();
   });
@@ -266,7 +274,7 @@ describe("evaluate", () => {
     });
   });
 
-  test("a new document gets a new world, a stale context is retried once", async () => {
+  test("a new document gets a new world, a world that is gone is retried once", async () => {
     const { browser, chrome, sessionId } = await start();
     let failNext = false;
     chrome.respond("Runtime.evaluate", () => {
@@ -327,7 +335,8 @@ describe("input", () => {
   test("type and fill check that the click took focus", async () => {
     const { browser, chrome } = await start();
     let focused = true;
-    chrome.respond("Runtime.evaluate", () => ({
+    chrome.respond("DOM.querySelector", () => ({ nodeId: 5 }));
+    chrome.respond("Runtime.callFunctionOn", () => ({
       result: { type: "boolean", value: focused },
     }));
     await browser.type("#q", "hi");
@@ -346,7 +355,11 @@ describe("input", () => {
     expect(chrome.called("Human.press").map((c) => c.params)).toEqual([
       { key: "Backspace" },
     ]);
-    expect(chrome.called("Runtime.evaluate")).toHaveLength(3);
+    const checks = chrome.called("Runtime.callFunctionOn");
+    expect(checks).toHaveLength(3);
+    expect(
+      checks.every((c) => c.params.functionDeclaration.includes("getRootNode()")),
+    ).toBe(true);
     focused = false; // an overlay took the click
     await expect(browser.fill("#q", "hello")).rejects.toThrow("'#q' did not take focus");
     expect(chrome.called("Human.type")).toHaveLength(2);
@@ -356,17 +369,18 @@ describe("input", () => {
 describe("reading", () => {
   test("text, attributes, counts, html", async () => {
     const { browser, chrome } = await start();
-    chrome.respond("Runtime.evaluate", (p) => ({
-      result: {
-        type: "string",
-        value: p.expression.includes("querySelectorAll") ? ["a", "b"] : "hi",
-      },
+    chrome.respond("Runtime.evaluate", () => ({
+      result: { type: "object", value: ["a", "b"] },
     }));
-    expect(await browser.innerText("h1")).toBe("hi");
-    expect(await browser.allInnerTexts("p")).toEqual(["a", "b"]);
+    chrome.respond("Runtime.callFunctionOn", () => ({
+      result: { type: "string", value: "hi" },
+    }));
     chrome.respond("DOM.querySelector", (p) => ({
       nodeId: p.selector === "#gone" ? 0 : 5,
     }));
+    expect(await browser.innerText("h1")).toBe("hi");
+    expect(await browser.innerText("#gone")).toBeNull();
+    expect(await browser.allInnerTexts("p")).toEqual(["a", "b"]);
     chrome.respond("DOM.getAttributes", () => ({
       attributes: ["href", "/x", "id", "a"],
     }));
@@ -389,14 +403,14 @@ describe("reading", () => {
 
   test("selectOption by value or label", async () => {
     const { browser, chrome } = await start();
-    chrome.respond("Runtime.evaluate", (p) => {
-      const args = JSON.parse(
-        p.expression.slice(p.expression.lastIndexOf("(...") + 4, -1),
-      );
-      if (args[0] === "#gone") return { result: { type: "object", value: null } };
-      if (args[1] === "x" || args[2] === "x")
+    chrome.respond("DOM.querySelector", (p) => ({
+      nodeId: p.selector === "#gone" ? 0 : 5,
+    }));
+    chrome.respond("Runtime.callFunctionOn", (p) => {
+      const args = p.arguments.map((a: { value: unknown }) => a.value);
+      if (args[0] === "x" || args[1] === "x")
         return { result: { type: "boolean", value: false } };
-      return { result: { type: "string", value: args[1] ?? "from-label" } };
+      return { result: { type: "string", value: args[0] ?? "from-label" } };
     });
     expect(await browser.selectOption("select", "v1")).toBe("v1");
     expect(await browser.selectOption("select", { label: "One" })).toBe("from-label");
@@ -411,6 +425,101 @@ describe("reading", () => {
     );
   });
 
+  test("innerText runs on the node the lookup found, and takes XPath", async () => {
+    const { browser, chrome } = await start();
+    chrome.respond("DOM.querySelector", () => ({ nodeId: 5 }));
+    chrome.respond("Runtime.callFunctionOn", () => ({
+      result: { type: "string", value: "Hello" },
+    }));
+    expect(await browser.innerText("h1")).toBe("Hello");
+    expect(chrome.onSession(browser._sessionId).slice(-5)).toEqual([
+      "DOM.getDocument",
+      "DOM.querySelector",
+      "Page.createIsolatedWorld",
+      "DOM.resolveNode",
+      "Runtime.callFunctionOn",
+    ]);
+    expect(chrome.called("Runtime.evaluate")).toHaveLength(0);
+    expect(chrome.called("DOM.resolveNode")[0]?.params).toEqual({
+      nodeId: 5,
+      executionContextId: 7,
+    });
+
+    chrome.respond("DOM.performSearch", () => ({
+      searchId: "s",
+      resultCount: 1,
+    }));
+    chrome.respond("DOM.getSearchResults", () => ({ nodeIds: [9] }));
+    expect(await browser.innerText("//h1")).toBe("Hello");
+    expect(chrome.called("DOM.resolveNode")[1]?.params).toMatchObject({
+      nodeId: 9,
+    });
+  });
+
+  test("a node-scoped call remakes the world after it is gone", async () => {
+    const { browser, chrome } = await start();
+    let worlds = 0;
+    let always = false;
+    chrome.respond("DOM.querySelector", () => ({ nodeId: 5 }));
+    chrome.respond("Page.createIsolatedWorld", () => ({
+      executionContextId: ++worlds,
+    }));
+    chrome.respond("Runtime.callFunctionOn", () => ({
+      result: { type: "string", value: "Hi" },
+    }));
+    chrome.respond("Runtime.evaluate", () => ({
+      result: { type: "number", value: 2 },
+    }));
+    chrome.respond("DOM.resolveNode", (p) =>
+      always || p.executionContextId < worlds
+        ? {
+            error: {
+              message: "Node with given id does not belong to the document",
+            },
+          }
+        : { object: { objectId: "O" } },
+    );
+    browser._worldId = undefined;
+    await browser.evaluate("1 + 1");
+    worlds = 2;
+    expect(await browser.innerText("h1")).toBe("Hi");
+    expect(worlds).toBe(3);
+
+    always = true;
+    browser._worldId = undefined;
+    await expect(browser.innerText("h1")).rejects.toThrow(
+      "does not belong to the document",
+    );
+  });
+
+  test("selectOption takes an XPath selector", async () => {
+    const { browser, chrome } = await start();
+    chrome.respond("DOM.performSearch", () => ({
+      searchId: "s",
+      resultCount: 1,
+    }));
+    chrome.respond("DOM.getSearchResults", () => ({ nodeIds: [9] }));
+    chrome.respond("DOM.discardSearchResults", () => ({}));
+    chrome.respond("Runtime.callFunctionOn", () => ({
+      result: { type: "string", value: "eu" },
+    }));
+    expect(await browser.selectOption("//select[@id='region']", "eu")).toBe("eu");
+    expect(chrome.called("DOM.resolveNode").at(-1)?.params).toEqual({
+      nodeId: 9,
+      executionContextId: 7,
+    });
+  });
+
+  const searching = (chrome: FakeChrome, keep: number): void => {
+    chrome.respond("DOM.discardSearchResults", () => ({}));
+    chrome.respond("DOM.resolveNode", (p) => ({
+      object: { objectId: `O${p.nodeId}` },
+    }));
+    chrome.respond("Runtime.callFunctionOn", (p) => ({
+      result: { type: "boolean", value: Number(p.objectId.slice(1)) === keep },
+    }));
+  };
+
   test("an XPath goes through the search domain, not querySelector", async () => {
     const { browser, chrome } = await start();
     chrome.respond("DOM.performSearch", (p) => ({
@@ -418,16 +527,107 @@ describe("reading", () => {
       resultCount: p.query === "//h2" ? 0 : 2,
     }));
     chrome.respond("DOM.getSearchResults", () => ({ nodeIds: [5, 6] }));
-    chrome.respond("DOM.discardSearchResults", () => ({}));
-    chrome.respond("DOM.getBoxModel", () => ({ model: { width: 80, height: 20 } }));
+    chrome.respond("DOM.getBoxModel", () => ({
+      model: { width: 999, height: 999, content: [0, 0, 80, 0, 80, 20, 0, 20] },
+    }));
     chrome.respond("DOM.getOuterHTML", () => ({ outerHTML: "<h1>Hi</h1>" }));
+    searching(chrome, 5);
     await browser.waitForSelector("//h1", { timeout: 500 });
     expect(await browser.outerHtml("xpath=//h1")).toBe("<h1>Hi</h1>");
-    expect(await browser.count("..//p")).toBe(2);
+    expect(await browser.count("..//p")).toBe(1);
     expect(await browser.outerHtml("//h2")).toBeNull();
     const methods = chrome.calls.map((c) => c.method);
     expect(methods).not.toContain("DOM.querySelector");
     expect(methods).not.toContain("DOM.querySelectorAll");
+    expect(chrome.called("DOM.performSearch").map((c) => c.params.query)).toEqual([
+      "//h1",
+      "//h1",
+      "..//p",
+      "//h2",
+    ]);
+    expect(
+      chrome
+        .called("Runtime.callFunctionOn")
+        .every((c) => c.params.arguments[0].value === null),
+    ).toBe(true);
+  });
+
+  const missing = (chrome: FakeChrome, keep: number): void => {
+    chrome.respond("DOM.querySelector", () => ({ nodeId: 0 }));
+    chrome.respond("DOM.querySelectorAll", () => ({ nodeIds: [] }));
+    chrome.respond("DOM.performSearch", () => ({
+      searchId: "s",
+      resultCount: 3,
+    }));
+    chrome.respond("DOM.getSearchResults", () => ({ nodeIds: [10, 20, 30] }));
+    chrome.respond("DOM.getOuterHTML", () => ({
+      outerHTML: "<div id=login></div>",
+    }));
+
+    chrome.respond("DOM.getBoxModel", () => ({
+      model: { width: 999, height: 999, content: [4, 8, 84, 8, 84, 28, 4, 28] },
+    }));
+    searching(chrome, keep);
+  };
+
+  test("a light-DOM miss falls back into the shadow roots", async () => {
+    const { browser, chrome } = await start();
+    missing(chrome, 30);
+
+    const before = chrome.onSession(browser._sessionId).length;
+    expect(await browser.outerHtml("#login")).toBe("<div id=login></div>");
+    expect(chrome.onSession(browser._sessionId).slice(before, before + 4)).toEqual([
+      "DOM.getDocument",
+      "DOM.querySelector",
+      "DOM.performSearch",
+      "DOM.getSearchResults",
+    ]);
+    expect(chrome.called("DOM.performSearch")[0]?.params).toEqual({
+      query: "#login",
+      includeUserAgentShadowDOM: false,
+    });
+    const checks = chrome.called("Runtime.callFunctionOn");
+    expect(checks).toHaveLength(3); // every candidate is checked
+    expect(checks.every((c) => c.params.arguments[0].value === "#login")).toBe(true);
+    expect(chrome.called("DOM.discardSearchResults")).toHaveLength(1);
+    expect(chrome.called("DOM.getOuterHTML")[0]?.params).toEqual({
+      nodeId: 30,
+    });
+    expect(chrome.called("Page.createIsolatedWorld")).toHaveLength(1);
+
+    expect(await browser.count("#login")).toBe(1);
+    expect(await browser.boundingBox("#login")).toEqual({
+      x: 4,
+      y: 8,
+      width: 80,
+      height: 20,
+    });
+  });
+
+  test("a miss that stays a miss still discards the search", async () => {
+    const { browser, chrome } = await start();
+    missing(chrome, 0);
+    expect(await browser.outerHtml("#login")).toBeNull();
+    expect(await browser.boundingBox("#login")).toBeNull();
+    expect(chrome.called("DOM.discardSearchResults")).toHaveLength(2);
+  });
+
+  test("a candidate that went away is no match, not a failure", async () => {
+    const { browser, chrome } = await start();
+    missing(chrome, 30);
+    chrome.respond("DOM.resolveNode", (p) =>
+      p.nodeId === 20
+        ? { error: { message: "Could not find node with given id" } }
+        : { object: { objectId: `O${p.nodeId}` } },
+    );
+    expect(await browser.outerHtml("#login")).toBe("<div id=login></div>");
+  });
+
+  test("count pierces only after a light-DOM miss", async () => {
+    const { browser, chrome } = await start();
+    chrome.respond("DOM.querySelectorAll", () => ({ nodeIds: [1, 2] }));
+    expect(await browser.count("li")).toBe(2);
+    expect(chrome.called("DOM.performSearch")).toHaveLength(0);
   });
 
   test("waitForSelector, isVisible", async () => {
@@ -450,7 +650,9 @@ describe("reading", () => {
     boxed = true;
     await browser.waitForSelector("#a");
     expect(await browser.isVisible("#a")).toBe(true);
-    chrome.respond("DOM.getBoxModel", () => ({ model: { width: 0, height: 5 } }));
+    chrome.respond("DOM.getBoxModel", () => ({
+      model: { width: 0, height: 5 },
+    }));
     expect(await browser.isVisible("#a")).toBe(false);
   });
 
@@ -497,7 +699,9 @@ describe("cookies and storage", () => {
     chrome.respond("Page.getFrameTree", () => ({
       frameTree: { frame: { storageKey: "https://x.test/" } },
     }));
-    chrome.respond("DOMStorage.getDOMStorageItems", () => ({ entries: [["k", "v"]] }));
+    chrome.respond("DOMStorage.getDOMStorageItems", () => ({
+      entries: [["k", "v"]],
+    }));
     expect(await browser.localStorage()).toEqual({ k: "v" });
     await browser.setSessionStorage({ a: "1", b: "2" });
     expect(chrome.called("DOMStorage.enable")).toHaveLength(1);
@@ -559,7 +763,9 @@ describe("screenshot", () => {
         clip: { x: 0, y: 0, scale: 1, width: 800, height: 3000 },
       },
     ]);
-    expect(chrome.called("DOM.scrollIntoViewIfNeeded")[0]?.params).toEqual({ nodeId: 4 });
+    expect(chrome.called("DOM.scrollIntoViewIfNeeded")[0]?.params).toEqual({
+      nodeId: 4,
+    });
     chrome.respond("DOM.querySelector", () => ({ nodeId: 0 }));
     await expect(browser.screenshot({ selector: "#gone" })).rejects.toThrow(
       "nothing matches '#gone'",
@@ -666,14 +872,16 @@ describe("network capture", () => {
     );
     await browser.stopCapturing();
     await browser.stopCapturing();
-    expect(chrome.called("Network.disable")).toHaveLength(1);
+    expect(chrome.called("Network.disable")).toHaveLength(0); // on for the status
     expect(browser.responses).toEqual([]);
   });
 
   test("a body that cannot be read leaves an empty one", async () => {
     const { browser, chrome, sessionId } = await start();
     await browser.captureResponses("/x");
-    chrome.respond("Network.getResponseBody", () => ({ error: { message: "No data" } }));
+    chrome.respond("Network.getResponseBody", () => ({
+      error: { message: "No data" },
+    }));
     chrome.event(
       "Network.responseReceived",
       { requestId: "R1", response: { url: "/x", status: 204 } },
@@ -712,7 +920,9 @@ describe("errors", () => {
     await expect(browser.click("#x")).rejects.toThrow(
       "Human.click '#x': the page navigated while the command ran.",
     );
-    chrome.respond("Human.type", () => ({ error: { message: "boom", code: -1 } }));
+    chrome.respond("Human.type", () => ({
+      error: { message: "boom", code: -1 },
+    }));
     const err = await browser.keyboard.type("x").catch((e) => e);
     expect(err).toBeInstanceOf(CDPError);
     expect(err.message).toBe("Human.type: boom");

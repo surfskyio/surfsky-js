@@ -217,9 +217,11 @@ describe("lease", () => {
     const p = await pool(r, { concurrency: 1 });
     await p.lease(async (browser) => {
       await browser.captureResponses("/x");
-      r.chromes[0]?.respond("Network.disable", () => ({ error: { message: "broken" } }));
+      r.chromes[0]?.respond("Browser.getVersion", () => ({
+        error: { message: "broken" },
+      }));
     });
-    expect(r.warned[0]).toMatch(/could not clean up sess-1: .*Network.disable: broken/);
+    expect(r.warned[0]).toMatch(/could not clean up sess-1: .*broken/);
     expect(r.stops()).toHaveLength(1);
     await p.lease(async (browser) => expect(browser.internalUuid).toBe("sess-2"));
   });

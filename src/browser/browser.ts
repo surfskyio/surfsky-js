@@ -8,13 +8,6 @@ import { CDPClient } from "./cdp.js";
 import type { WaitOptions } from "./page.js";
 import { Deadline, Page, POLL_INTERVAL } from "./page.js";
 
-// Pauses the document response so its HTTP status can be read, and nothing else
-const STATUS_PATTERN = {
-  urlPattern: "*",
-  resourceType: "Document",
-  requestStage: "Response",
-};
-
 // Every page target, present and future, attached on this socket and paused
 // until its setup is done
 const AUTO_ATTACH = {
@@ -171,7 +164,7 @@ export class Browser extends Page implements AsyncDisposable {
       .sort()
       .map((name) => ({ urlPattern: "*", resourceType: RESOURCE_TYPES[name] }));
     for (const pattern of this.blockedUrls) patterns.push({ urlPattern: pattern });
-    return [...patterns, STATUS_PATTERN];
+    return patterns;
   }
 
   /** Replace this browser with a fresh one after the lease. */

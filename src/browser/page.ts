@@ -26,18 +26,38 @@ function asXPath(s: string): string | undefined {
   return /^\s*(xpath=|\/\/|\.\.)/.test(s) ? s.trim().replace(/^xpath=/, "") : undefined;
 }
 
-const SELECT = `(selector, value, label) => {
-  const el = document.querySelector(selector);
-  if (!el) return null;
-  const option = Array.from(el.options).find(
+const SELECT = `function (value, label) {
+  const option = Array.from(this.options).find(
     o => label === null ? o.value === value : o.label === label || o.text === label
   );
   if (!option) return false;
-  el.value = option.value;
-  el.dispatchEvent(new Event("input", {bubbles: true}));
-  el.dispatchEvent(new Event("change", {bubbles: true}));
+  this.value = option.value;
+  this.dispatchEvent(new Event("input", {bubbles: true}));
+  this.dispatchEvent(new Event("change", {bubbles: true}));
   return option.value;
 }`;
+
+const INNER_TEXT = "function () { return this.innerText }";
+
+const IS_FOCUSED = "function () { return this.getRootNode().activeElement === this }";
+
+const MATCHES =
+  "function (s) { return this.nodeType === 1 && (s == null || this.matches(s)) }";
+
+// what Chrome answers once the isolated world is gone
+const WORLD_GONE = ["Cannot find context", "does not belong to the document"];
+
+const worldIsGone = (err: unknown): boolean =>
+  err instanceof CDPError && WORLD_GONE.some((text) => err.message.includes(text));
+
+function remoteResult(result: Record<string, any>, what: string): Record<string, any> {
+  const details = result.exceptionDetails;
+  if (details) {
+    const exception = details.exception ?? {};
+    throw new CDPError(`${what} failed: ${exception.description ?? details.text}`);
+  }
+  return result.result;
+}
 
 export type DialogHandler = (
   kind: string,
@@ -302,11 +322,13 @@ export class Page extends Actions {
 
   /** @internal */
   async _setup(waiting: boolean): Promise<void> {
+    const patterns = this._browser._fetchPatterns;
     const commands: [string, Record<string, unknown> | undefined][] = [
       ["Page.enable", undefined],
       ["Page.setLifecycleEventsEnabled", { enabled: true }],
-      ["Fetch.enable", { patterns: this._browser._fetchPatterns }],
+      ["Network.enable", undefined],
     ];
+    if (patterns.length > 0) commands.push(["Fetch.enable", { patterns }]);
     if (waiting) commands.push(["Runtime.runIfWaitingForDebugger", undefined]);
     const timeout = this._browser.commandTimeout;
     let posted: { id: number; reply: Promise<any> }[] = [];
@@ -446,16 +468,14 @@ export class Page extends Actions {
   async captureResponses(...fragments: string[]): Promise<void> {
     if (fragments.length === 0)
       throw new TypeError("captureResponses needs at least one URL fragment");
-    if (this._captures.length === 0) await this.send("Network.enable");
+    this._requireOpen();
     this._captures.push(...fragments);
   }
 
   async stopCapturing(): Promise<void> {
-    if (this._captures.length === 0) return;
     this._captures = [];
     this._responses = [];
     this._inFlight.clear();
-    await this.send("Network.disable");
   }
 
   async waitForResponse(
@@ -483,6 +503,9 @@ export class Page extends Actions {
     const response: Record<string, unknown> = isRecord(event.response)
       ? event.response
       : {};
+    if (event.type === "Document" && event.frameId === this._frameId) {
+      this._status = typeof response.status === "number" ? response.status : undefined;
+    }
     const url = typeof response.url === "string" ? response.url : "";
     if (this._captures.some((fragment) => url.includes(fragment))) {
       this._inFlight.set(String(event.requestId), response);
@@ -613,24 +636,45 @@ export class Page extends Actions {
     try {
       result = await this.send("Runtime.evaluate", params);
     } catch (err) {
-      if (
-        !isolated ||
-        !(err instanceof CDPError) ||
-        !err.message.includes("Cannot find context")
-      ) {
-        throw err;
-      }
-      // the document changed under us before its event came: once more
+      if (!isolated || !worldIsGone(err)) throw err;
+      // the document was replaced before its event came: once more
       this._worldId = undefined;
       params.contextId = await this.#world();
       result = await this.send("Runtime.evaluate", params);
     }
-    const details = result.exceptionDetails;
-    if (details) {
-      const exception = details.exception ?? {};
-      throw new CDPError(`evaluate failed: ${exception.description ?? details.text}`);
+    return remoteResult(result, "evaluate");
+  }
+
+  async #call(nodeId: number, fn: string, ...args: unknown[]): Promise<any> {
+    const params: Record<string, unknown> = {
+      functionDeclaration: fn,
+      arguments: args.map((value) => ({ value })),
+      returnByValue: true,
+    };
+    let result: Record<string, any>;
+    try {
+      result = await this.#callInWorld(nodeId, params);
+    } catch (err) {
+      if (!worldIsGone(err)) throw err;
+      // the document was replaced before its event came: once more
+      this._worldId = undefined;
+      result = await this.#callInWorld(nodeId, params);
     }
-    return result.result;
+    return remoteResult(result, "call").value;
+  }
+
+  async #callInWorld(
+    nodeId: number,
+    params: Record<string, unknown>,
+  ): Promise<Record<string, any>> {
+    const resolved = await this.send("DOM.resolveNode", {
+      nodeId,
+      executionContextId: await this.#world(),
+    });
+    return await this.send("Runtime.callFunctionOn", {
+      ...params,
+      objectId: resolved.object.objectId,
+    });
   }
 
   async #world(): Promise<number> {
@@ -660,10 +704,10 @@ export class Page extends Actions {
     }
   }
 
-  innerText(selector: string): Promise<string | null> {
-    return this.evaluate("s => document.querySelector(s)?.innerText ?? null", {
-      args: [selector],
-    });
+  async innerText(selector: string): Promise<string | null> {
+    const nodeId = await this.#nodeId(selector);
+    if (nodeId === undefined) return null;
+    return await this.#call(nodeId, INNER_TEXT);
   }
 
   allInnerTexts(selector: string): Promise<string[]> {
@@ -691,11 +735,10 @@ export class Page extends Actions {
 
   async #validateFocus(selector: string): Promise<void> {
     // Human.type goes to the focused element, which is wherever the click landed
-    const focused = await this.evaluate(
-      "s => document.activeElement === document.querySelector(s)",
-      { args: [selector] },
-    );
-    if (!focused) throw new Error(`'${selector}' did not take focus`);
+    const nodeId = await this.#nodeId(selector);
+    if (nodeId === undefined || !(await this.#call(nodeId, IS_FOCUSED))) {
+      throw new Error(`'${selector}' did not take focus`);
+    }
   }
 
   async getAttribute(selector: string, name: string): Promise<string | null> {
@@ -712,12 +755,35 @@ export class Page extends Actions {
   async count(selector: string): Promise<number> {
     const document = await this.send("DOM.getDocument", { depth: 0 });
     const xpath = asXPath(selector);
-    if (xpath !== undefined) return (await this.#search(xpath)).length;
+    if (xpath !== undefined) return (await this.#search(selector)).length;
     const found = await this.send("DOM.querySelectorAll", {
       nodeId: document.root.nodeId,
       selector,
     });
-    return ((found.nodeIds as unknown[] | undefined) ?? []).length;
+    const nodeIds = (found.nodeIds as unknown[] | undefined) ?? [];
+    if (nodeIds.length > 0) return nodeIds.length;
+    return (await this.#search(selector)).length;
+  }
+
+  async boundingBox(
+    selector: string,
+  ): Promise<{ x: number; y: number; width: number; height: number } | null> {
+    const nodeId = await this.#nodeId(selector);
+    if (nodeId === undefined) return null;
+    let box: Record<string, any>;
+    try {
+      box = await this.send("DOM.getBoxModel", { nodeId });
+    } catch (err) {
+      if (err instanceof CDPError) return null;
+      throw err;
+    }
+    const quad = box.model.content as number[];
+    return {
+      x: quad[0] as number,
+      y: quad[1] as number,
+      width: (quad[2] as number) - (quad[0] as number),
+      height: (quad[5] as number) - (quad[1] as number),
+    };
   }
 
   async selectOption(
@@ -728,10 +794,9 @@ export class Page extends Actions {
     if ((value === undefined) === (label === undefined)) {
       throw new TypeError("selectOption takes either a value or a label");
     }
-    const picked = await this.evaluate(SELECT, {
-      args: [selector, value ?? null, label ?? null],
-    });
-    if (picked === null) throw new Error(`nothing matches '${selector}'`);
+    const nodeId = await this.#nodeId(selector);
+    if (nodeId === undefined) throw new Error(`nothing matches '${selector}'`);
+    const picked = await this.#call(nodeId, SELECT, value ?? null, label ?? null);
     if (picked === false)
       throw new Error(`'${selector}' has no option '${label ?? value}'`);
     return picked as string;
@@ -773,17 +838,20 @@ export class Page extends Actions {
   async #nodeId(selector: string): Promise<number | undefined> {
     const document = await this.send("DOM.getDocument", { depth: 0 });
     const xpath = asXPath(selector);
-    if (xpath !== undefined) return (await this.#search(xpath))[0];
+    if (xpath !== undefined) return (await this.#search(selector))[0];
     const found = await this.send("DOM.querySelector", {
       nodeId: document.root.nodeId,
       selector,
     });
-    return found.nodeId || undefined;
+    if (found.nodeId) return found.nodeId;
+    return (await this.#search(selector))[0];
   }
 
-  async #search(query: string): Promise<number[]> {
+  async #search(selector: string): Promise<number[]> {
+    const xpath = asXPath(selector);
     const { searchId, resultCount = 0 } = await this.send("DOM.performSearch", {
-      query,
+      query: xpath ?? selector,
+      includeUserAgentShadowDOM: false,
     });
     try {
       if (!resultCount) return [];
@@ -792,7 +860,18 @@ export class Page extends Actions {
         fromIndex: 0,
         toIndex: resultCount,
       });
-      return got.nodeIds ?? [];
+      const nodeIds = (got.nodeIds as number[] | undefined) ?? [];
+      const css = xpath === undefined ? selector : null;
+      await this.#world();
+      const kept = await Promise.all(
+        nodeIds.map((nodeId) =>
+          this.#call(nodeId, MATCHES, css).catch((err) => {
+            if (err instanceof CDPError) return false;
+            throw err;
+          }),
+        ),
+      );
+      return nodeIds.filter((_, i) => kept[i]);
     } finally {
       await this.send("DOM.discardSearchResults", { searchId }).catch(() => undefined);
     }
@@ -953,20 +1032,12 @@ export class Page extends Actions {
       this._browser.logger.warn("Fetch.requestPaused without a requestId");
       return;
     }
-    const status = event.responseStatusCode;
-    if (status !== undefined && status !== null) {
-      if (event.frameId === this._frameId) this._status = status;
-      this._spawn(this._send("Fetch.continueResponse", { requestId }));
-    } else if (event.responseErrorReason) {
-      this._spawn(this._send("Fetch.continueRequest", { requestId }));
-    } else {
-      this._spawn(
-        this._send("Fetch.failRequest", {
-          requestId,
-          errorReason: "BlockedByClient",
-        }),
-      );
-    }
+    this._spawn(
+      this._send("Fetch.failRequest", {
+        requestId,
+        errorReason: "BlockedByClient",
+      }),
+    );
   }
 
   /** @internal */
