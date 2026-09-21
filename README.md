@@ -99,7 +99,7 @@ Cookies and browser state persist between leases. Handlers are not retried.
 
 - [SDK API reference](https://github.com/surfskyio/surfsky-js/blob/main/docs/api.md)
 - [REST API](https://docs.surfsky.io/api-reference)
-- [Examples](https://github.com/surfskyio/surfsky-js/tree/main/examples): forms, tabs, retries, profiles and CDP connections.
+- [Examples](https://github.com/surfskyio/surfsky-js/tree/main/examples): forms, tabs, retries, profiles, a closed shadow root and CDP connections.
 
 `client.session()` exposes a WebSocket URL for external browser clients.
 See the [Playwright](https://github.com/surfskyio/surfsky-js/blob/main/examples/playwright_connect.ts),
