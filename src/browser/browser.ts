@@ -2,11 +2,11 @@ import { BrowserTimeoutError } from "../errors.js";
 import type { Logger } from "../transport.js";
 import { makeLogger } from "../transport.js";
 import type { Session } from "../types.js";
-import { Flag, sleep, withTimeout } from "../util.js";
+import { Flag, withTimeout } from "../util.js";
 import type { CreateWebSocket, EventHandler } from "./cdp.js";
 import { CDPClient } from "./cdp.js";
 import type { WaitOptions } from "./page.js";
-import { Deadline, Page, POLL_INTERVAL } from "./page.js";
+import { Deadline, Page } from "./page.js";
 
 // Every page target, present and future, attached on this socket and paused
 // until its setup is done
@@ -26,39 +26,46 @@ function isStartPage(url: string): boolean {
 }
 
 // CDP Network.ResourceType values
-export const RESOURCE_TYPES: Readonly<Record<string, string>> = Object.fromEntries(
-  [
-    "Stylesheet",
-    "Image",
-    "Media",
-    "Font",
-    "Script",
-    "TextTrack",
-    "XHR",
-    "Fetch",
-    "Prefetch",
-    "EventSource",
-    "WebSocket",
-    "Manifest",
-    "SignedExchange",
-    "Ping",
-    "CSPViolationReport",
-    "Preflight",
-    "FedCM",
-    "Other",
-  ].map((name) => [name.toLowerCase(), name]),
-);
+export const RESOURCE_TYPES: Readonly<Record<string, string>> =
+  Object.fromEntries(
+    [
+      "Stylesheet",
+      "Image",
+      "Media",
+      "Font",
+      "Script",
+      "TextTrack",
+      "XHR",
+      "Fetch",
+      "Prefetch",
+      "EventSource",
+      "WebSocket",
+      "Manifest",
+      "SignedExchange",
+      "Ping",
+      "CSPViolationReport",
+      "Preflight",
+      "FedCM",
+      "Other",
+    ].map((name) => [name.toLowerCase(), name]),
+  );
 
 export function normalizeBlocked(
   resources?: Iterable<string> | null,
 ): ReadonlySet<string> {
   if (typeof resources === "string") {
-    throw new TypeError("blockResources takes a list of resource types, not 1 string");
+    throw new TypeError(
+      "blockResources takes a list of resource types, not 1 string",
+    );
   }
-  const blocked = new Set([...(resources ?? [])].map((name) => name.toLowerCase()));
+  const blocked = new Set(
+    [...(resources ?? [])].map((name) => name.toLowerCase()),
+  );
   if (blocked.has("document"))
     throw new TypeError("blocking 'document' blocks the page itself");
-  const unknown = [...blocked].filter((name) => !(name in RESOURCE_TYPES)).sort();
+  const unknown = [...blocked]
+    .filter((name) => !(name in RESOURCE_TYPES))
+    .sort();
   if (unknown.length > 0) {
     const valid = Object.keys(RESOURCE_TYPES).sort();
     throw new TypeError(
@@ -68,7 +75,9 @@ export function normalizeBlocked(
   return blocked;
 }
 
-export function normalizeUrls(patterns?: readonly string[] | null): readonly string[] {
+export function normalizeUrls(
+  patterns?: readonly string[] | null,
+): readonly string[] {
   // "*.png" as a string would become "*", ".", "p"... and "*" blocks all
   if (typeof patterns === "string") {
     throw new TypeError("blockUrls takes a list of patterns, not 1 string");
@@ -103,6 +112,7 @@ export class Browser extends Page implements AsyncDisposable {
   #client: CDPClient | undefined;
   #abort: AbortController = new AbortController();
   readonly #pending: Set<Promise<void>> = new Set();
+  _changed: PromiseWithResolvers<void> = Promise.withResolvers<void>();
   #closing: Promise<void> | undefined;
   #retired = false;
   #useCount = 0;
@@ -163,7 +173,8 @@ export class Browser extends Page implements AsyncDisposable {
     const patterns: Record<string, unknown>[] = [...this.blockedResources]
       .sort()
       .map((name) => ({ urlPattern: "*", resourceType: RESOURCE_TYPES[name] }));
-    for (const pattern of this.blockedUrls) patterns.push({ urlPattern: pattern });
+    for (const pattern of this.blockedUrls)
+      patterns.push({ urlPattern: pattern });
     return patterns;
   }
 
@@ -173,7 +184,10 @@ export class Browser extends Page implements AsyncDisposable {
   }
 
   async newPage(): Promise<Page> {
-    const deadline = new Deadline(this.commandTimeout, "the new page did not open");
+    const deadline = new Deadline(
+      this.commandTimeout,
+      "the new page did not open",
+    );
     const created = await deadline.race(
       this.cdp.send("Target.createTarget", {
         url: "about:blank",
@@ -205,13 +219,13 @@ export class Browser extends Page implements AsyncDisposable {
       const last = opened[opened.length - 1];
       if (last !== undefined) return last;
       this._requireOpen();
-      deadline.check();
-      await sleep(POLL_INTERVAL);
+      await deadline.race(this._change());
     }
   }
 
   async connect(): Promise<void> {
-    if (this.#client !== undefined) throw new Error("browser is already connected");
+    if (this.#client !== undefined)
+      throw new Error("browser is already connected");
     const handler = this.onDialog; // survives a reconnect
     this._reset("", "");
     this.onDialog = handler;
@@ -229,7 +243,9 @@ export class Browser extends Page implements AsyncDisposable {
       this.#client = client;
       await deadline.race(client.start());
       client.on("Target.attachedToTarget", (event) => this._onAttached(event));
-      client.on("Target.detachedFromTarget", (event) => this._onDetached(event));
+      client.on("Target.detachedFromTarget", (event) =>
+        this._onDetached(event),
+      );
       client.on(
         "Inspector.targetCrashed",
         this.#toPage((page) => this._drop(page)),
@@ -305,7 +321,10 @@ export class Browser extends Page implements AsyncDisposable {
     await withTimeout(
       this.cdp.send("Browser.getVersion"),
       timeout,
-      () => new BrowserTimeoutError(`the browser did not answer within ${timeout}ms`),
+      () =>
+        new BrowserTimeoutError(
+          `the browser did not answer within ${timeout}ms`,
+        ),
     );
   }
 
@@ -314,8 +333,7 @@ export class Browser extends Page implements AsyncDisposable {
     let page = this.#pageFor(targetId);
     while (page === undefined) {
       this._requireOpen();
-      deadline.check();
-      await sleep(POLL_INTERVAL);
+      await deadline.race(this._change());
       page = this.#pageFor(targetId);
     }
     await deadline.race(page._waitReady());
@@ -355,20 +373,34 @@ export class Browser extends Page implements AsyncDisposable {
     page._frameId = page._targetId; // the page target's main frame
     page._ready = new Flag(); // commands on it wait for the setup
     this._pages.set(sessionId, page);
+    this._notify();
     this._spawn(page._setup(waiting));
+  }
+
+  /** @internal */
+  _notify(): void {
+    this._changed.resolve();
+    this._changed = Promise.withResolvers<void>();
   }
 
   async #letGo(sessionId: string, waiting: boolean): Promise<void> {
     const timeout = this.commandTimeout;
     const detach = async () => {
       if (waiting)
-        await this.cdp.send("Runtime.runIfWaitingForDebugger", undefined, sessionId);
+        await this.cdp.send(
+          "Runtime.runIfWaitingForDebugger",
+          undefined,
+          sessionId,
+        );
       await this.cdp.send("Target.detachFromTarget", { sessionId });
     };
     await withTimeout(
       detach(),
       timeout,
-      () => new BrowserTimeoutError(`the target did not let go within ${timeout}ms`),
+      () =>
+        new BrowserTimeoutError(
+          `the target did not let go within ${timeout}ms`,
+        ),
     );
   }
 
@@ -382,6 +414,7 @@ export class Browser extends Page implements AsyncDisposable {
   _drop(page: Page): void {
     this._pages.delete(page._sessionId);
     page._closed = true;
+    this._notify();
     page._waiter?.fail("page closed");
     if (page === this) {
       this.logger.warn(`page target gone for ${this.internalUuid}`);
@@ -389,7 +422,9 @@ export class Browser extends Page implements AsyncDisposable {
     }
   }
 
-  #toPage(handler: (page: Page, event: Record<string, any>) => void): EventHandler {
+  #toPage(
+    handler: (page: Page, event: Record<string, any>) => void,
+  ): EventHandler {
     return (event, sessionId) => {
       const page = this._pages.get(sessionId ?? "");
       if (page !== undefined) handler(page, event);
@@ -402,6 +437,7 @@ export class Browser extends Page implements AsyncDisposable {
       page._closed = true;
       page._waiter?.fail("CDP connection closed");
     }
+    this._notify();
   }
 
   /** @internal track a background task; its failure is logged at debug level */

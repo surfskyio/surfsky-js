@@ -23,7 +23,9 @@ export const DIALOG_DELAY: readonly [number, number] = [600, 1400];
 const FUNCTION = /^\s*(async\s+)?(function\b|\([^()]*\)\s*=>|[\w$]+\s*=>)/;
 
 function asXPath(s: string): string | undefined {
-  return /^\s*(xpath=|\/\/|\.\.)/.test(s) ? s.trim().replace(/^xpath=/, "") : undefined;
+  return /^\s*(xpath=|\/\/|\.\.)/.test(s)
+    ? s.trim().replace(/^xpath=/, "")
+    : undefined;
 }
 
 const SELECT = `function (value, label) {
@@ -39,7 +41,8 @@ const SELECT = `function (value, label) {
 
 const INNER_TEXT = "function () { return this.innerText }";
 
-const IS_FOCUSED = "function () { return this.getRootNode().activeElement === this }";
+const IS_FOCUSED =
+  "function () { return this.getRootNode().activeElement === this }";
 
 const MATCHES =
   "function (s) { return this.nodeType === 1 && (s == null || this.matches(s)) }";
@@ -48,13 +51,19 @@ const MATCHES =
 const WORLD_GONE = ["Cannot find context", "does not belong to the document"];
 
 const worldIsGone = (err: unknown): boolean =>
-  err instanceof CDPError && WORLD_GONE.some((text) => err.message.includes(text));
+  err instanceof CDPError &&
+  WORLD_GONE.some((text) => err.message.includes(text));
 
-function remoteResult(result: Record<string, any>, what: string): Record<string, any> {
+function remoteResult(
+  result: Record<string, any>,
+  what: string,
+): Record<string, any> {
   const details = result.exceptionDetails;
   if (details) {
     const exception = details.exception ?? {};
-    throw new CDPError(`${what} failed: ${exception.description ?? details.text}`);
+    throw new CDPError(
+      `${what} failed: ${exception.description ?? details.text}`,
+    );
   }
   return result.result;
 }
@@ -99,7 +108,9 @@ export function cookieParam(
 
 function fromCdpCookie(raw: Record<string, unknown>): Cookie {
   const { expires, ...rest } = raw;
-  return (expires === undefined ? rest : { expirationDate: expires, ...rest }) as Cookie;
+  return (
+    expires === undefined ? rest : { expirationDate: expires, ...rest }
+  ) as Cookie;
 }
 
 function commandFailed(
@@ -108,7 +119,8 @@ function commandFailed(
   err: CDPError,
 ): CDPError {
   const selector = params?.selector;
-  const where = typeof selector === "string" ? `${method} '${selector}'` : method;
+  const where =
+    typeof selector === "string" ? `${method} '${selector}'` : method;
   if (err.message.includes("Could not find node with given id")) {
     return new CDPError(`${where}: the page navigated while the command ran.`, {
       code: err.code,
@@ -131,20 +143,20 @@ export class Deadline {
     this.timeout = timeout ?? null;
     this.message = message;
     this.until =
-      this.timeout === null ? Number.POSITIVE_INFINITY : Date.now() + this.timeout;
+      this.timeout === null
+        ? Number.POSITIVE_INFINITY
+        : Date.now() + this.timeout;
   }
 
   error(): BrowserTimeoutError {
     return new BrowserTimeoutError(`${this.message} within ${this.timeout}ms`);
   }
 
-  check(): void {
-    if (Date.now() >= this.until) throw this.error();
-  }
-
   race<T>(promise: Promise<T>): Promise<T> {
     if (this.timeout === null) return promise;
-    return withTimeout(promise, Math.max(0, this.until - Date.now()), () => this.error());
+    return withTimeout(promise, Math.max(0, this.until - Date.now()), () =>
+      this.error(),
+    );
   }
 }
 
@@ -246,7 +258,11 @@ export class Page extends Actions {
   /** @internal */ _responses!: CapturedResponse[];
   /** @internal */ _inFlight!: Map<string, Record<string, unknown>>;
 
-  constructor(browser: Browser | undefined, targetId: string, sessionId: string) {
+  constructor(
+    browser: Browser | undefined,
+    targetId: string,
+    sessionId: string,
+  ) {
     super();
     this._browser = browser ?? (this as unknown as Browser);
     this._reset(targetId, sessionId);
@@ -288,7 +304,10 @@ export class Page extends Actions {
     return this._status;
   }
 
-  override async send(method: string, params?: Record<string, unknown>): Promise<any> {
+  override async send(
+    method: string,
+    params?: Record<string, unknown>,
+  ): Promise<any> {
     this._requireOpen();
     await this._waitReady();
     return this._send(method, params);
@@ -306,7 +325,10 @@ export class Page extends Actions {
       return await withTimeout(
         this.cdp.send(method, params, this._sessionId),
         timeout,
-        () => new BrowserTimeoutError(`${method} did not answer within ${timeout}ms`),
+        () =>
+          new BrowserTimeoutError(
+            `${method} did not answer within ${timeout}ms`,
+          ),
       );
     } catch (err) {
       if (err instanceof CDPError) throw commandFailed(method, params, err);
@@ -315,6 +337,10 @@ export class Page extends Actions {
   }
 
   /** @internal */
+  _change(): Promise<void> {
+    return Promise.race([this._browser._changed.promise, sleep(POLL_INTERVAL)]);
+  }
+
   async _waitReady(): Promise<void> {
     await this._ready.wait();
     if (this._setupError !== undefined) throw this._setupError;
@@ -351,7 +377,8 @@ export class Page extends Actions {
       await withTimeout(
         Promise.all(replies),
         timeout,
-        () => new BrowserTimeoutError(`the page was not ready within ${timeout}ms`),
+        () =>
+          new BrowserTimeoutError(`the page was not ready within ${timeout}ms`),
       );
     } catch (err) {
       this._setupError = err;
@@ -368,7 +395,8 @@ export class Page extends Actions {
     await withTimeout(
       this.cdp.send("Target.closeTarget", { targetId: this._targetId }),
       timeout,
-      () => new BrowserTimeoutError(`the page did not close within ${timeout}ms`),
+      () =>
+        new BrowserTimeoutError(`the page did not close within ${timeout}ms`),
     );
     this._browser._drop(this);
   }
@@ -388,14 +416,14 @@ export class Page extends Actions {
     );
     while (!this._milestones.has(milestone)) {
       this._requireOpen();
-      deadline.check();
-      await sleep(POLL_INTERVAL);
+      await deadline.race(this._change());
     }
   }
 
   async goto(url: string, options: GotoOptions = {}): Promise<void> {
     const waitUntil = options.waitUntil ?? "load";
-    if (this._waiter !== undefined) throw new Error("navigation already in progress");
+    if (this._waiter !== undefined)
+      throw new Error("navigation already in progress");
     const waiter = new NavWaiter(LIFECYCLE_EVENT[waitUntil]);
     this._waiter = waiter;
     this._status = undefined;
@@ -418,7 +446,8 @@ export class Page extends Actions {
 
   async reload(options: GotoOptions = {}): Promise<void> {
     const waitUntil = options.waitUntil ?? "load";
-    if (this._waiter !== undefined) throw new Error("navigation already in progress");
+    if (this._waiter !== undefined)
+      throw new Error("navigation already in progress");
     const waiter = new NavWaiter(LIFECYCLE_EVENT[waitUntil]);
     this._waiter = waiter;
     this._status = undefined;
@@ -454,8 +483,7 @@ export class Page extends Actions {
     while (true) {
       const moved = await deadline.race(this.send("Page.getNavigationHistory"));
       if (moved.currentIndex === index) break;
-      deadline.check();
-      await sleep(POLL_INTERVAL);
+      await deadline.race(sleep(POLL_INTERVAL));
     }
     return this.url();
   }
@@ -490,11 +518,12 @@ export class Page extends Actions {
       `no response matching '${fragment}'`,
     );
     while (true) {
-      const found = this._responses.find((response) => response.url.includes(fragment));
+      const found = this._responses.find((response) =>
+        response.url.includes(fragment),
+      );
       if (found !== undefined) return found;
       this._requireOpen();
-      deadline.check();
-      await sleep(POLL_INTERVAL);
+      await deadline.race(this._change());
     }
   }
 
@@ -504,7 +533,8 @@ export class Page extends Actions {
       ? event.response
       : {};
     if (event.type === "Document" && event.frameId === this._frameId) {
-      this._status = typeof response.status === "number" ? response.status : undefined;
+      this._status =
+        typeof response.status === "number" ? response.status : undefined;
     }
     const url = typeof response.url === "string" ? response.url : "";
     if (this._captures.some((fragment) => url.includes(fragment))) {
@@ -530,18 +560,25 @@ export class Page extends Actions {
     try {
       const result = await this.send("Network.getResponseBody", { requestId });
       const raw = typeof result.body === "string" ? result.body : "";
-      body = result.base64Encoded ? fromBase64(raw) : new TextEncoder().encode(raw);
+      body = result.base64Encoded
+        ? fromBase64(raw)
+        : new TextEncoder().encode(raw);
     } catch (err) {
-      this._browser.logger.debug(`no body for ${String(response.url)}: ${String(err)}`);
+      this._browser.logger.debug(
+        `no body for ${String(response.url)}: ${String(err)}`,
+      );
     }
     into.push(
       new CapturedResponse(
         typeof response.url === "string" ? response.url : "",
         typeof response.status === "number" ? response.status : 0,
-        isRecord(response.headers) ? (response.headers as Record<string, string>) : {},
+        isRecord(response.headers)
+          ? (response.headers as Record<string, string>)
+          : {},
         body,
       ),
     );
+    this._browser._notify();
   }
 
   localStorage(): Promise<Record<string, string>> {
@@ -568,10 +605,15 @@ export class Page extends Actions {
     const items = await this.send("DOMStorage.getDOMStorageItems", {
       storageId: await this.#storageId(local),
     });
-    return Object.fromEntries((items.entries as [string, string][] | undefined) ?? []);
+    return Object.fromEntries(
+      (items.entries as [string, string][] | undefined) ?? [],
+    );
   }
 
-  async #setStorage(values: Record<string, string>, local: boolean): Promise<void> {
+  async #setStorage(
+    values: Record<string, string>,
+    local: boolean,
+  ): Promise<void> {
     const storageId = await this.#storageId(local);
     for (const [key, value] of Object.entries(values)) {
       await this.send("DOMStorage.setDOMStorageItem", {
@@ -608,7 +650,8 @@ export class Page extends Actions {
   ): Promise<any> {
     const isolated = options.isolated ?? true;
     const awaitPromise = options.awaitPromise ?? true;
-    let expr = typeof expression === "function" ? expression.toString() : expression;
+    let expr =
+      typeof expression === "function" ? expression.toString() : expression;
     if (options.args !== undefined && options.args.length > 0) {
       expr = `(${expr})(...${JSON.stringify(options.args)})`;
     } else if (FUNCTION.test(expr)) {
@@ -694,13 +737,13 @@ export class Page extends Actions {
     options: EvaluateOptions & WaitOptions = {},
   ): Promise<any> {
     const { timeout = 30_000, ...rest } = options;
-    const label = typeof expression === "function" ? "the function" : `'${expression}'`;
+    const label =
+      typeof expression === "function" ? "the function" : `'${expression}'`;
     const deadline = new Deadline(timeout, `${label} was not truthy`);
     while (true) {
       const value = await deadline.race(this.evaluate(expression, rest));
       if (value) return value;
-      deadline.check();
-      await sleep(POLL_INTERVAL);
+      await deadline.race(sleep(POLL_INTERVAL));
     }
   }
 
@@ -790,13 +833,19 @@ export class Page extends Actions {
     selector: string,
     option: string | { value?: string; label?: string },
   ): Promise<string> {
-    const { value, label } = typeof option === "string" ? { value: option } : option;
+    const { value, label } =
+      typeof option === "string" ? { value: option } : option;
     if ((value === undefined) === (label === undefined)) {
       throw new TypeError("selectOption takes either a value or a label");
     }
     const nodeId = await this.#nodeId(selector);
     if (nodeId === undefined) throw new Error(`nothing matches '${selector}'`);
-    const picked = await this.#call(nodeId, SELECT, value ?? null, label ?? null);
+    const picked = await this.#call(
+      nodeId,
+      SELECT,
+      value ?? null,
+      label ?? null,
+    );
     if (picked === false)
       throw new Error(`'${selector}' has no option '${label ?? value}'`);
     return picked as string;
@@ -813,8 +862,7 @@ export class Page extends Actions {
       `'${selector}' was not ${state}`,
     );
     while (!(await deadline.race(this.#matches(selector, visible)))) {
-      deadline.check();
-      await sleep(POLL_INTERVAL);
+      await deadline.race(sleep(POLL_INTERVAL));
     }
   }
 
@@ -873,12 +921,17 @@ export class Page extends Actions {
       );
       return nodeIds.filter((_, i) => kept[i]);
     } finally {
-      await this.send("DOM.discardSearchResults", { searchId }).catch(() => undefined);
+      await this.send("DOM.discardSearchResults", { searchId }).catch(
+        () => undefined,
+      );
     }
   }
 
   /** Wait until the URL contains the fragment. Returns the URL. */
-  async waitForUrl(fragment: string, options: WaitOptions = {}): Promise<string> {
+  async waitForUrl(
+    fragment: string,
+    options: WaitOptions = {},
+  ): Promise<string> {
     const deadline = new Deadline(
       options.timeout ?? 30_000,
       `the page did not reach '${fragment}'`,
@@ -886,8 +939,7 @@ export class Page extends Actions {
     while (true) {
       const url = await deadline.race(this.url());
       if (url.includes(fragment)) return url;
-      deadline.check();
-      await sleep(POLL_INTERVAL);
+      await deadline.race(sleep(POLL_INTERVAL));
     }
   }
 
@@ -903,7 +955,9 @@ export class Page extends Actions {
     return html.outerHTML;
   }
 
-  async setCookies(cookies: (Cookie | Record<string, unknown>)[]): Promise<void> {
+  async setCookies(
+    cookies: (Cookie | Record<string, unknown>)[],
+  ): Promise<void> {
     await this.send("Network.setCookies", {
       cookies: cookies.map(cookieParam),
     });
@@ -933,9 +987,9 @@ export class Page extends Actions {
 
   async cookies(): Promise<Cookie[]> {
     const result = await this.send("Network.getCookies");
-    return ((result.cookies as Record<string, unknown>[] | undefined) ?? []).map(
-      fromCdpCookie,
-    );
+    return (
+      (result.cookies as Record<string, unknown>[] | undefined) ?? []
+    ).map(fromCdpCookie);
   }
 
   async screenshot(options: ScreenshotOptions = {}): Promise<Uint8Array> {
@@ -990,6 +1044,7 @@ export class Page extends Actions {
       this._loaderId = loaderId;
       this._milestones = new Set([name]);
     }
+    this._browser._notify();
     this._waiter?.observe(name, loaderId);
   }
 

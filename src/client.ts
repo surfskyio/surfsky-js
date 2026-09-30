@@ -1,6 +1,11 @@
 import { Browser, normalizeBlocked, normalizeUrls } from "./browser/browser.js";
 import type { CreateWebSocket } from "./browser/cdp.js";
-import type { PoolHandler, PoolOptions, PoolOutcome } from "./browser/pool.js";
+import type {
+  LeaseOptions,
+  PoolHandler,
+  PoolOptions,
+  PoolOutcome,
+} from "./browser/pool.js";
 import { BrowserPool } from "./browser/pool.js";
 import { ConfigurationError } from "./errors.js";
 import { Account } from "./resources/account.js";
@@ -43,6 +48,7 @@ export interface RequestOptions {
 export interface SessionStartOptions extends SessionOptions {
   /** A saved profile to start; a one-time session when absent. */
   profileUuid?: string;
+  signal?: AbortSignal;
 }
 
 export interface BrowserStartOptions extends SessionStartOptions {
@@ -68,9 +74,11 @@ export function connection(
   baseUrl?: string,
 ): { baseUrl: string; headers: Record<string, string> } {
   const token = apiToken || process.env.SURFSKY_API_TOKEN;
-  if (!token) throw new ConfigurationError("pass apiToken or set SURFSKY_API_TOKEN");
+  if (!token)
+    throw new ConfigurationError("pass apiToken or set SURFSKY_API_TOKEN");
   const url = baseUrl || process.env.SURFSKY_API_BASE_URL;
-  if (!url) throw new ConfigurationError("pass baseUrl or set SURFSKY_API_BASE_URL");
+  if (!url)
+    throw new ConfigurationError("pass baseUrl or set SURFSKY_API_BASE_URL");
   return {
     baseUrl: url.replace(/\/+$/, ""),
     headers: {
@@ -82,7 +90,8 @@ export function connection(
 }
 
 /** A started session that stops itself on `stop()` or `await using`. */
-export type ManagedSession = Session & AsyncDisposable & { stop(): Promise<void> };
+export type ManagedSession = Session &
+  AsyncDisposable & { stop(): Promise<void> };
 
 export class Surfsky implements AsyncDisposable {
   readonly baseUrl: string;
@@ -106,7 +115,8 @@ export class Surfsky implements AsyncDisposable {
     this.maxRetries = options.maxRetries ?? 3;
     this.backoff = options.backoff ?? 500;
     this.logger = makeLogger(options.logger);
-    this.fetch = options.fetch ?? ((input, init) => globalThis.fetch(input, init));
+    this.fetch =
+      options.fetch ?? ((input, init) => globalThis.fetch(input, init));
     this.profiles = new Profiles(this);
     this.proxies = new Proxies(this);
     this.fingerprints = new Fingerprints(this);
@@ -136,7 +146,11 @@ export class Surfsky implements AsyncDisposable {
   }
 
   /** A raw call for endpoints the SDK does not cover. Never throws on status. */
-  request(method: string, path: string, options: RequestOptions = {}): Promise<Response> {
+  request(
+    method: string,
+    path: string,
+    options: RequestOptions = {},
+  ): Promise<Response> {
     const spec: Spec<unknown> = {
       method,
       path,
@@ -148,7 +162,10 @@ export class Surfsky implements AsyncDisposable {
     return this.#send(spec, options.headers);
   }
 
-  #send(spec: Spec<unknown>, headers?: Record<string, string>): Promise<Response> {
+  #send(
+    spec: Spec<unknown>,
+    headers?: Record<string, string>,
+  ): Promise<Response> {
     return send(spec, {
       fetch: this.fetch,
       baseUrl: this.baseUrl,
@@ -162,7 +179,8 @@ export class Surfsky implements AsyncDisposable {
 
   /** Start a session; `stop()` it (or `await using`) so it does not keep billing. */
   async session(options: SessionStartOptions = {}): Promise<ManagedSession> {
-    const { profileUuid, ...rest } = options;
+    const { profileUuid, signal, ...rest } = options;
+    signal?.throwIfAborted();
     const session =
       profileUuid === undefined
         ? await this.profiles.startOneTime(rest)
@@ -172,6 +190,10 @@ export class Surfsky implements AsyncDisposable {
       stopping ??= stopSession(this, session.internal_uuid);
       return stopping;
     };
+    if (signal?.aborted) {
+      await stop();
+      throw signal.reason;
+    }
     return { ...session, stop, [Symbol.asyncDispose]: stop };
   }
 
@@ -179,6 +201,7 @@ export class Surfsky implements AsyncDisposable {
   async browser(options: BrowserStartOptions = {}): Promise<Browser> {
     const {
       profileUuid,
+      signal,
       blockResources,
       blockUrls,
       connectTimeout,
@@ -189,7 +212,11 @@ export class Surfsky implements AsyncDisposable {
     // validate before a session is billed
     const blocked = normalizeBlocked(blockResources);
     const urls = normalizeUrls(blockUrls);
-    const session = await this.session({ profileUuid, ...sessionOptions });
+    const session = await this.session({
+      profileUuid,
+      signal,
+      ...sessionOptions,
+    });
     const browser = new Browser(session, {
       blockResources: blocked,
       blockUrls: urls,
@@ -199,7 +226,19 @@ export class Surfsky implements AsyncDisposable {
       logger: this.logger,
       onClose: () => session.stop(),
     });
-    await browser.connect(); // a failure closes the browser, which stops the session
+    const onAbort = (): void => void browser.close(); // which stops the session
+    signal?.addEventListener("abort", onAbort, { once: true });
+    try {
+      await browser.connect();
+    } catch (err) {
+      throw signal?.aborted ? signal.reason : err;
+    } finally {
+      signal?.removeEventListener("abort", onAbort);
+    }
+    if (signal?.aborted) {
+      await browser.close();
+      throw signal.reason;
+    }
     return browser;
   }
 
@@ -212,11 +251,12 @@ export class Surfsky implements AsyncDisposable {
   async map<I, R>(
     handler: PoolHandler<I, R>,
     items: Iterable<I>,
-    options: PoolOptions = {},
+    options: PoolOptions & LeaseOptions = {},
   ): Promise<PoolOutcome<I, R>[]> {
-    const pool = await this.browsers(options);
+    const { signal, ...poolOptions } = options;
+    const pool = await this.browsers(poolOptions);
     try {
-      return await pool.map(handler, items);
+      return await pool.map(handler, items, { signal });
     } finally {
       await pool.close();
     }

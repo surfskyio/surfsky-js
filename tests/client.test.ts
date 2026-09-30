@@ -2,7 +2,7 @@ import { afterEach, describe, expect, test } from "vitest";
 import { connection, Surfsky } from "../src/client.js";
 import { ConfigurationError } from "../src/errors.js";
 import { FakeChrome } from "./fakeChrome.js";
-import { fakeFetch, ok, testClient } from "./helpers.js";
+import { fakeFetch, ok, settle, testClient } from "./helpers.js";
 
 const saved = { ...process.env };
 afterEach(() => {
@@ -14,7 +14,9 @@ describe("connection", () => {
     process.env.SURFSKY_API_TOKEN = "";
     process.env.SURFSKY_API_BASE_URL = "";
     expect(() => new Surfsky()).toThrow(ConfigurationError);
-    expect(() => new Surfsky({ apiToken: "t" })).toThrow(/SURFSKY_API_BASE_URL/);
+    expect(() => new Surfsky({ apiToken: "t" })).toThrow(
+      /SURFSKY_API_BASE_URL/,
+    );
   });
 
   test("falls back to the environment and trims the slash", () => {
@@ -31,7 +33,9 @@ describe("connection", () => {
 });
 
 test("requests carry the headers and hit baseUrl + path", async () => {
-  const { client, requests } = testClient([ok([])], { headers: { "X-Extra": "1" } });
+  const { client, requests } = testClient([ok([])], {
+    headers: { "X-Extra": "1" },
+  });
   await client.profiles.listActive();
   expect(requests[0]?.url).toBe("https://api.test/profiles/active");
   expect(requests[0]?.headers["x-cloud-api-token"]).toBe("test-token");
@@ -57,7 +61,9 @@ test("withOptions clones with overrides and shares fetch", async () => {
 });
 
 test("request returns the raw response without throwing", async () => {
-  const { client, requests } = testClient([{ status: 404, json: { msg: "no" } }]);
+  const { client, requests } = testClient([
+    { status: 404, json: { msg: "no" } },
+  ]);
   const response = await client.request("GET", "/whatever", {
     params: { a: 1 },
     headers: { "X-One": "1" },
@@ -78,10 +84,14 @@ describe("session", () => {
   test("starts one-time or on a profile, stops once on dispose", async () => {
     const session = { internal_uuid: "s1", ws_url: "ws://x" };
     const { client, requests } = testClient([ok(session), ok({ uuid: "p" })]);
-    const managed = await client.session({ proxy: { tier: "shared", country: "us" } });
+    const managed = await client.session({
+      proxy: { tier: "shared", country: "us" },
+    });
     expect(managed.internal_uuid).toBe("s1");
     expect(requests[0]?.path).toBe("/profiles/one_time");
-    expect(requests[0]?.body).toEqual({ proxy: { tier: "shared", country: "us" } });
+    expect(requests[0]?.body).toEqual({
+      proxy: { tier: "shared", country: "us" },
+    });
     await managed.stop();
     await managed[Symbol.asyncDispose]();
     expect(requests).toHaveLength(2);
@@ -173,7 +183,9 @@ describe("browser", () => {
     await expect(client.browser({ blockResources: ["nope"] })).rejects.toThrow(
       /unknown resource/,
     );
-    await expect(client.browser({ proxi: 1 } as never)).rejects.toThrow(/proxi/);
+    await expect(client.browser({ proxi: 1 } as never)).rejects.toThrow(
+      /proxi/,
+    );
     expect(requests).toHaveLength(0);
   });
 
@@ -183,10 +195,69 @@ describe("browser", () => {
       ok(null),
     ]);
     const chrome = new FakeChrome();
-    chrome.respond("Target.setAutoAttach", () => ({ error: { message: "refused" } }));
-    await expect(client.browser({ createWebSocket: chrome.create })).rejects.toThrow(
-      "refused",
-    );
+    chrome.respond("Target.setAutoAttach", () => ({
+      error: { message: "refused" },
+    }));
+    await expect(
+      client.browser({ createWebSocket: chrome.create }),
+    ).rejects.toThrow("refused");
+    expect(requests.map((r) => r.path)).toEqual([
+      "/profiles/one_time",
+      "/profiles/s1/stop",
+    ]);
+  });
+});
+
+describe("signal", () => {
+  test("an aborted start never asks the server", async () => {
+    const { client, requests } = testClient([]);
+    const reason = new Error("stop");
+    await expect(
+      client.session({ signal: AbortSignal.abort(reason) }),
+    ).rejects.toBe(reason);
+    await expect(
+      client.browser({ signal: AbortSignal.abort(reason) }),
+    ).rejects.toBe(reason);
+    expect(requests).toHaveLength(0);
+  });
+
+  test("an abort during the start POST stops the session it created", async () => {
+    const fake = fakeFetch([
+      ok({ internal_uuid: "s1", ws_url: "ws://x" }),
+      ok(null),
+    ]);
+    const ac = new AbortController();
+    const client = new Surfsky({
+      apiToken: "t",
+      baseUrl: "https://api.test",
+      logger: null,
+      fetch: (input, init) => {
+        if (String(input).endsWith("/one_time")) ac.abort(new Error("stop"));
+        return fake.fetch(input, init);
+      },
+    });
+    await expect(client.session({ signal: ac.signal })).rejects.toThrow("stop");
+    expect(fake.requests.map((r) => r.path)).toEqual([
+      "/profiles/one_time",
+      "/profiles/s1/stop",
+    ]);
+  });
+
+  test("an abort during connect closes the browser and stops the session", async () => {
+    const { client, requests } = testClient([
+      ok({ internal_uuid: "s1", ws_url: "ws://x" }),
+      ok(null),
+    ]);
+    const chrome = new FakeChrome();
+    chrome.hangs.add("Target.setAutoAttach");
+    const ac = new AbortController();
+    const started = client.browser({
+      signal: ac.signal,
+      createWebSocket: chrome.create,
+    });
+    await settle();
+    ac.abort(new Error("stop"));
+    await expect(started).rejects.toThrow("stop");
     expect(requests.map((r) => r.path)).toEqual([
       "/profiles/one_time",
       "/profiles/s1/stop",

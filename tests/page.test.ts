@@ -964,3 +964,29 @@ test("NavWaiter bookkeeping", () => {
   fresh.fail("x");
   expect(fresh.error).toBe("x");
 });
+
+describe("waits", () => {
+  test("a wait on the SDK's own state wakes on the event, not on the next tick", async () => {
+    vi.useFakeTimers();
+    const { browser, chrome, sessionId } = await start();
+    chrome.autoNavigate = false;
+    await browser.goto("https://x.test", { waitUntil: "commit" });
+    const load = browser.waitForLoadState("load", { timeout: 10_000 });
+    chrome.lifecycle(sessionId, "L1", ["init", "load"]);
+    await vi.advanceTimersByTimeAsync(1); // well under POLL_INTERVAL
+    await expect(load).resolves.toBeUndefined();
+
+    const opened = browser.waitForPage(Promise.resolve(), { timeout: 10_000 });
+    chrome.attachPage("POP", { url: "https://x.test/pop" });
+    await vi.advanceTimersByTimeAsync(1);
+    expect((await opened).targetId).toBe("POP");
+  });
+
+  test("a poll on page state ends on its deadline, not on the next tick", async () => {
+    vi.useFakeTimers();
+    const { browser } = await start();
+    const failed = browser.waitForSelector("#never", { timeout: 50 }).catch((e) => e);
+    await vi.advanceTimersByTimeAsync(60);
+    expect(await failed).toBeInstanceOf(BrowserTimeoutError);
+  });
+});

@@ -46,6 +46,10 @@ export type PoolOutcome<I, R> =
   | { ok: true; item: I; index: number; value: R }
   | { ok: false; item: I; index: number; error: unknown };
 
+export interface LeaseOptions {
+  signal?: AbortSignal;
+}
+
 function planIsFull(err: unknown): boolean {
   return err instanceof RateLimitError && err.code === PLAN_FULL;
 }
@@ -84,7 +88,6 @@ export class BrowserPool implements AsyncDisposable {
   #idle: Browser[] = [];
   #owned = 0;
   #planFull = false;
-  #planFullError: unknown;
   #waiters: (() => void)[] = [];
   #capacity = 0;
   #slots: Semaphore | undefined;
@@ -108,7 +111,8 @@ export class BrowserPool implements AsyncDisposable {
     const { proxy } = sessionOptions;
     parseOneTimeStartRequest({
       ...sessionOptions,
-      proxy: typeof proxy === "function" || isProxySource(proxy) ? undefined : proxy,
+      proxy:
+        typeof proxy === "function" || isProxySource(proxy) ? undefined : proxy,
     });
     this.sessionOptions = sessionOptions;
   }
@@ -121,7 +125,9 @@ export class BrowserPool implements AsyncDisposable {
 
   #requireOpen(): Semaphore {
     if (this.#slots === undefined) {
-      throw new Error("the pool is not open: use `await client.browsers()` or `open()`");
+      throw new Error(
+        "the pool is not open: use `await client.browsers()` or `open()`",
+      );
     }
     return this.#slots;
   }
@@ -134,7 +140,6 @@ export class BrowserPool implements AsyncDisposable {
     this.#capacity = Math.max(1, total);
     this.#slots = new Semaphore(this.#capacity);
     this.#planFull = false;
-    this.#planFullError = undefined;
     this.#owned = 0;
     return this;
   }
@@ -153,15 +158,21 @@ export class BrowserPool implements AsyncDisposable {
   }
 
   /** Run `fn` on a live browser, then hand the browser back. Waits while all are busy. */
-  async lease<R>(fn: (browser: Browser) => Promise<R>): Promise<R> {
+  async lease<R>(
+    fn: (browser: Browser) => Promise<R>,
+    { signal }: LeaseOptions = {},
+  ): Promise<R> {
+    signal?.throwIfAborted();
     const slots = this.#requireOpen();
     await slots.acquire();
     try {
       if (this.#slots !== slots)
         throw new Error("the pool was closed while waiting for a slot");
+      signal?.throwIfAborted();
       const browser = await this.#acquire();
       browser._lease();
       try {
+        signal?.throwIfAborted();
         return await fn(browser);
       } finally {
         await this.#release(browser);
@@ -195,14 +206,6 @@ export class BrowserPool implements AsyncDisposable {
       const idle = this.#idle.pop();
       if (idle !== undefined) return idle;
       if (this.#planFull) {
-        if (this.#owned === 0) {
-          throw (
-            this.#planFullError ??
-            new RateLimitError("parallel browser limit reached", {
-              statusCode: 429,
-            })
-          );
-        }
         await this.#wait(); // 1 refusal is enough, do not retry
         continue;
       }
@@ -211,15 +214,12 @@ export class BrowserPool implements AsyncDisposable {
       try {
         browser = await this.#startBrowser();
       } catch (err) {
-        const full = planIsFull(err);
         this.#owned -= 1;
-        if (full) {
-          this.#planFull = true;
-          this.#planFullError = err;
-        }
-        const nothingLeft = this.#owned === 0;
+        // with nothing of ours to wait for, the refusal is the caller's and the
+        // next lease asks the server again
+        this.#planFull = planIsFull(err) && this.#owned > 0;
         this.#notifyAll();
-        if (!full || nothingLeft) throw err;
+        if (!this.#planFull) throw err;
         this.#client.logger.info("plan is full, waiting for a browser of ours");
         continue;
       }
@@ -258,6 +258,7 @@ export class BrowserPool implements AsyncDisposable {
   async map<I, R>(
     handler: PoolHandler<I, R>,
     items: Iterable<I>,
+    { signal }: LeaseOptions = {},
   ): Promise<PoolOutcome<I, R>[]> {
     const work = items[Symbol.iterator](); // shared: no item is taken twice
     const outcomes: PoolOutcome<I, R>[] = [];
@@ -265,14 +266,16 @@ export class BrowserPool implements AsyncDisposable {
     let stopped = false;
 
     const worker = async (): Promise<void> => {
-      while (!stopped) {
+      while (!stopped && !signal?.aborted) {
         const next = work.next();
         if (next.done) return;
         const item = next.value;
         const at = index;
         index += 1;
         try {
-          const value = await this.lease((browser) => handler(browser, item));
+          const value = await this.lease((browser) => handler(browser, item), {
+            signal,
+          });
           outcomes.push({ ok: true, item, index: at, value });
         } catch (error) {
           outcomes.push({ ok: false, item, index: at, error });
@@ -289,7 +292,9 @@ export class BrowserPool implements AsyncDisposable {
   }
 
   async #startBrowser(): Promise<Browser> {
-    const session = await this.#client.profiles.startOneTime(this.sessionOptions);
+    const session = await this.#client.profiles.startOneTime(
+      this.sessionOptions,
+    );
     let browser: Browser;
     try {
       browser = new Browser(session, {

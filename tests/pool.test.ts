@@ -25,7 +25,10 @@ function rig(routes: Routes = {}, limits = { parallel_browsers: 2 }): Rig {
     {
       "POST /profiles/one_time": () => {
         counter += 1;
-        return ok({ internal_uuid: `sess-${counter}`, ws_url: `ws://fake/${counter}` });
+        return ok({
+          internal_uuid: `sess-${counter}`,
+          ws_url: `ws://fake/${counter}`,
+        });
       },
       "GET /users/browser-limits": () => ok(limits),
       ...routes,
@@ -81,27 +84,36 @@ describe("capacity", () => {
 
   test("options are checked before anything starts", () => {
     const r = rig();
-    expect(() => new BrowserPool(r.client, { proxi: "x" } as never)).toThrow(/proxi/);
+    expect(() => new BrowserPool(r.client, { proxi: "x" } as never)).toThrow(
+      /proxi/,
+    );
     // NaN would make `map` do nothing at all and `lease` wait for ever
-    expect(() => new BrowserPool(r.client, { concurrency: Number("x") })).toThrow(
+    expect(
+      () => new BrowserPool(r.client, { concurrency: Number("x") }),
+    ).toThrow(/whole number/);
+    expect(() => new BrowserPool(r.client, { concurrency: 2.5 })).toThrow(
       /whole number/,
     );
-    expect(() => new BrowserPool(r.client, { concurrency: 2.5 })).toThrow(/whole number/);
     expect(() => new BrowserPool(r.client, { proxy: 42 as never })).toThrow(
       ValidationError,
     );
-    expect(() => new BrowserPool(r.client, { blockResources: ["nope"] })).toThrow(
-      /unknown resource/,
-    );
     expect(
-      () => new BrowserPool(r.client, { extensions: ["1", "2", "3", "4", "5", "6"] }),
+      () => new BrowserPool(r.client, { blockResources: ["nope"] }),
+    ).toThrow(/unknown resource/);
+    expect(
+      () =>
+        new BrowserPool(r.client, {
+          extensions: ["1", "2", "3", "4", "5", "6"],
+        }),
     ).toThrow(/<=5 items/);
     expect(r.requests).toHaveLength(0);
   });
 
   test("browsers() rejects a bad option, never throws synchronously", async () => {
     const r = rig();
-    await expect(r.client.browsers({ proxi: "x" } as never)).rejects.toThrow(/proxi/);
+    await expect(r.client.browsers({ proxi: "x" } as never)).rejects.toThrow(
+      /proxi/,
+    );
   });
 });
 
@@ -160,7 +172,9 @@ describe("lease", () => {
     expect(await leasing).toBe("sess-1"); // the handler still ran on it
     expect(r.warned[0]).toMatch(/could not clean up sess-1/);
     expect(r.stops().map((s) => s.path)).toEqual(["/profiles/sess-1/stop"]);
-    expect(await p.lease(async (browser) => browser.internalUuid)).toBe("sess-2");
+    expect(await p.lease(async (browser) => browser.internalUuid)).toBe(
+      "sess-2",
+    );
   });
 
   test("a dead idle browser is recycled on the next lease", async () => {
@@ -223,7 +237,9 @@ describe("lease", () => {
     });
     expect(r.warned[0]).toMatch(/could not clean up sess-1: .*broken/);
     expect(r.stops()).toHaveLength(1);
-    await p.lease(async (browser) => expect(browser.internalUuid).toBe("sess-2"));
+    await p.lease(async (browser) =>
+      expect(browser.internalUuid).toBe("sess-2"),
+    );
   });
 
   test("the handler's error propagates and the browser is kept", async () => {
@@ -243,7 +259,11 @@ describe("lease", () => {
 describe("plan limits", () => {
   const planFull = () => ({
     status: 429,
-    json: { success: false, msg: "limit", code: "parallel_browsers_limit_reached" },
+    json: {
+      success: false,
+      msg: "limit",
+      code: "parallel_browsers_limit_reached",
+    },
   });
 
   test("a full plan with a browser of ours is backpressure", async () => {
@@ -272,15 +292,22 @@ describe("plan limits", () => {
     expect(starts).toBe(2); // 1 refusal is enough
   });
 
-  test("a full plan with nothing of ours throws", async () => {
-    const r = rig({ "POST /profiles/one_time": planFull });
+  test("a full plan with nothing of ours throws, and the next lease asks again", async () => {
+    let starts = 0;
+    const r = rig({
+      "POST /profiles/one_time": () => {
+        starts += 1;
+        return starts === 1
+          ? planFull()
+          : ok({ internal_uuid: "sess-1", ws_url: "ws://fake/1" });
+      },
+    });
     const p = await pool(r, { concurrency: 2 });
     const err = await p.lease(async () => 1).catch((e) => e);
     expect(err).toBeInstanceOf(RateLimitError);
     expect(err.code).toBe("parallel_browsers_limit_reached");
-    expect(r.starts()).toHaveLength(1);
-    // and again on the next attempt, without a new request: the plan is still full
-    await expect(p.lease(async () => 1)).rejects.toBe(err);
+    expect(await p.lease(async (browser) => browser.useCount)).toBe(1);
+    expect(r.starts()).toHaveLength(2);
   });
 
   test("another start error is raised as is", async () => {
@@ -295,10 +322,15 @@ describe("plan limits", () => {
     const r = rig();
     const createWebSocket = (url: string) => {
       const chrome = new FakeChrome();
-      chrome.respond("Target.setAutoAttach", () => ({ error: { message: "no" } }));
+      chrome.respond("Target.setAutoAttach", () => ({
+        error: { message: "no" },
+      }));
       return chrome.create(url);
     };
-    open = await new BrowserPool(r.client, { createWebSocket, concurrency: 1 }).open();
+    open = await new BrowserPool(r.client, {
+      createWebSocket,
+      concurrency: 1,
+    }).open();
     await expect(open.lease(async () => 1)).rejects.toThrow("no");
     expect(r.stops().map((s) => s.path)).toEqual(["/profiles/sess-1/stop"]);
   });
@@ -323,12 +355,14 @@ describe("map", () => {
     );
     expect(outcomes.map((o) => o.index)).toEqual([0, 1, 2, 3, 4]);
     expect(outcomes.map((o) => o.item)).toEqual([1, 2, 3, 4, 5]);
-    expect(outcomes.filter((o) => o.ok).map((o) => (o.ok ? o.value : ""))).toHaveLength(
-      4,
-    );
+    expect(
+      outcomes.filter((o) => o.ok).map((o) => (o.ok ? o.value : "")),
+    ).toHaveLength(4);
     const failed = outcomes[2];
     expect(failed?.ok).toBe(false);
-    expect(failed && !failed.ok ? String(failed.error) : "").toBe("Error: bad 3");
+    expect(failed && !failed.ok ? String(failed.error) : "").toBe(
+      "Error: bad 3",
+    );
     expect(peak).toBe(2);
     expect(r.starts()).toHaveLength(2);
   });
@@ -345,9 +379,9 @@ describe("map", () => {
     );
     expect(outcomes.map((o) => o.item)).toEqual([1, 2]);
     expect(outcomes[1]?.ok).toBe(false);
-    expect(outcomes[1] && !outcomes[1].ok ? outcomes[1].error : null).toBeInstanceOf(
-      StopRun,
-    );
+    expect(
+      outcomes[1] && !outcomes[1].ok ? outcomes[1].error : null,
+    ).toBeInstanceOf(StopRun);
   });
 
   test("an empty run starts nothing", async () => {
@@ -391,5 +425,53 @@ describe("close with leases in flight", () => {
     await expect(queued).rejects.toThrow(/closed while waiting/);
     expect(r.starts()).toHaveLength(1);
     expect(r.stops()).toHaveLength(1);
+  });
+});
+
+describe("signal", () => {
+  test("an aborted lease starts nothing", async () => {
+    const r = rig();
+    const p = await pool(r, { concurrency: 1 });
+    const reason = new Error("stop");
+    await expect(
+      p.lease(async () => 1, { signal: AbortSignal.abort(reason) }),
+    ).rejects.toBe(reason);
+    expect(r.starts()).toHaveLength(0);
+  });
+
+  test("an abort while waiting for a slot gives the slot up; the browser stays pooled", async () => {
+    const r = rig();
+    const p = await pool(r, { concurrency: 1 });
+    const release = Promise.withResolvers<void>();
+    const holder = p.lease(async (browser) => {
+      await release.promise;
+      return browser;
+    });
+    await settle();
+    const ac = new AbortController();
+    const waiter = p.lease(async () => "never", { signal: ac.signal });
+    await settle();
+    ac.abort(new Error("stop"));
+    release.resolve();
+    const browser = await holder;
+    await expect(waiter).rejects.toThrow("stop");
+    expect(await p.lease(async (again) => again)).toBe(browser);
+    expect(r.starts()).toHaveLength(1);
+  });
+
+  test("map takes no new items after an abort; the one running finishes", async () => {
+    const r = rig();
+    const p = await pool(r, { concurrency: 1 });
+    const ac = new AbortController();
+    const outcomes = await p.map(
+      async (_browser, item: number) => {
+        if (item === 1) ac.abort(new Error("stop"));
+        return item * 10;
+      },
+      [1, 2, 3],
+      { signal: ac.signal },
+    );
+    expect(outcomes).toEqual([{ ok: true, item: 1, index: 0, value: 10 }]);
+    expect(r.starts()).toHaveLength(1);
   });
 });

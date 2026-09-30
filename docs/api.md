@@ -10,10 +10,10 @@ milliseconds, default 30 000, and throw `BrowserTimeoutError`.
 
 | Method | Description |
 | --- | --- |
-| `session({ profileUuid, ...options })` | Start a session. Returns the `Session` (`internal_uuid`, `ws_url`) with `stop()` and `await using` support. |
-| `browser({ profileUuid, blockResources, blockUrls, connectTimeout, commandTimeout, ...options })` | Start a session and connect a `Browser`. `close()` stops both. |
+| `session({ profileUuid, signal, ...options })` | Start a session. Returns the `Session` (`internal_uuid`, `ws_url`) with `stop()` and `await using` support. An abort of `signal` stops the session the start created. |
+| `browser({ profileUuid, blockResources, blockUrls, connectTimeout, commandTimeout, signal, ...options })` | Start a session and connect a `Browser`. `close()` stops both, and so does an abort of `signal`. |
 | `browsers({ concurrency: "auto", blockResources, blockUrls, ...options })` | An open `BrowserPool`. `close()` stops every browser. |
-| `map(handler, items, poolOptions)` | `browsers()` and `pool.map()` in one call. |
+| `map(handler, items, { signal, ...poolOptions })` | `browsers()` and `pool.map()` in one call. |
 | `withOptions({ timeout, maxRetries, headers })` | Copy with overrides. Same fetch and logger. |
 | `request(method, path, { json, params, body, headers, timeout })` | Raw call. Returns the fetch `Response`, never throws on status. |
 | `close()` | Nothing to release; here for `await using`. |
@@ -33,8 +33,8 @@ and errors go to the console; `logger: null` silences the SDK.
 
 | Member | Description |
 | --- | --- |
-| `pool.lease(fn)` | Runs `fn(browser)` on a live browser and hands it back after. Waits while all are busy. |
-| `pool.map(handler, items)` | `handler(browser, item)` per item, `capacity` at a time. Returns `PoolOutcome` list in input order: `{ ok: true, item, index, value }` or `{ ok: false, item, index, error }`. Throw `StopRun` to end early. |
+| `pool.lease(fn, { signal })` | Runs `fn(browser)` on a live browser and hands it back after. Waits while all are busy; an abort of `signal` ends the wait. |
+| `pool.map(handler, items, { signal })` | `handler(browser, item)` per item, `capacity` at a time. An abort of `signal` takes no new items. Returns `PoolOutcome` list in input order: `{ ok: true, item, index, value }` or `{ ok: false, item, index, error }`. Throw `StopRun` to end early. |
 | `pool.capacity` | Max live browsers. `"auto"` is the plan's limit, `SURFSKY_MAX_BROWSERS` overrides it. |
 | `browser.data` | Per-browser object. Survives leases. |
 | `browser.useCount` | Leases so far, current included. |
