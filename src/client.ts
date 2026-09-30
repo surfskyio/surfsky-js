@@ -74,11 +74,9 @@ export function connection(
   baseUrl?: string,
 ): { baseUrl: string; headers: Record<string, string> } {
   const token = apiToken || process.env.SURFSKY_API_TOKEN;
-  if (!token)
-    throw new ConfigurationError("pass apiToken or set SURFSKY_API_TOKEN");
+  if (!token) throw new ConfigurationError("pass apiToken or set SURFSKY_API_TOKEN");
   const url = baseUrl || process.env.SURFSKY_API_BASE_URL;
-  if (!url)
-    throw new ConfigurationError("pass baseUrl or set SURFSKY_API_BASE_URL");
+  if (!url) throw new ConfigurationError("pass baseUrl or set SURFSKY_API_BASE_URL");
   return {
     baseUrl: url.replace(/\/+$/, ""),
     headers: {
@@ -90,8 +88,7 @@ export function connection(
 }
 
 /** A started session that stops itself on `stop()` or `await using`. */
-export type ManagedSession = Session &
-  AsyncDisposable & { stop(): Promise<void> };
+export type ManagedSession = Session & AsyncDisposable & { stop(): Promise<void> };
 
 export class Surfsky implements AsyncDisposable {
   readonly baseUrl: string;
@@ -115,8 +112,7 @@ export class Surfsky implements AsyncDisposable {
     this.maxRetries = options.maxRetries ?? 3;
     this.backoff = options.backoff ?? 500;
     this.logger = makeLogger(options.logger);
-    this.fetch =
-      options.fetch ?? ((input, init) => globalThis.fetch(input, init));
+    this.fetch = options.fetch ?? ((input, init) => globalThis.fetch(input, init));
     this.profiles = new Profiles(this);
     this.proxies = new Proxies(this);
     this.fingerprints = new Fingerprints(this);
@@ -146,11 +142,7 @@ export class Surfsky implements AsyncDisposable {
   }
 
   /** A raw call for endpoints the SDK does not cover. Never throws on status. */
-  request(
-    method: string,
-    path: string,
-    options: RequestOptions = {},
-  ): Promise<Response> {
+  request(method: string, path: string, options: RequestOptions = {}): Promise<Response> {
     const spec: Spec<unknown> = {
       method,
       path,
@@ -162,10 +154,7 @@ export class Surfsky implements AsyncDisposable {
     return this.#send(spec, options.headers);
   }
 
-  #send(
-    spec: Spec<unknown>,
-    headers?: Record<string, string>,
-  ): Promise<Response> {
+  #send(spec: Spec<unknown>, headers?: Record<string, string>): Promise<Response> {
     return send(spec, {
       fetch: this.fetch,
       baseUrl: this.baseUrl,

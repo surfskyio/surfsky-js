@@ -84,22 +84,18 @@ describe("capacity", () => {
 
   test("options are checked before anything starts", () => {
     const r = rig();
-    expect(() => new BrowserPool(r.client, { proxi: "x" } as never)).toThrow(
-      /proxi/,
-    );
+    expect(() => new BrowserPool(r.client, { proxi: "x" } as never)).toThrow(/proxi/);
     // NaN would make `map` do nothing at all and `lease` wait for ever
-    expect(
-      () => new BrowserPool(r.client, { concurrency: Number("x") }),
-    ).toThrow(/whole number/);
-    expect(() => new BrowserPool(r.client, { concurrency: 2.5 })).toThrow(
+    expect(() => new BrowserPool(r.client, { concurrency: Number("x") })).toThrow(
       /whole number/,
     );
+    expect(() => new BrowserPool(r.client, { concurrency: 2.5 })).toThrow(/whole number/);
     expect(() => new BrowserPool(r.client, { proxy: 42 as never })).toThrow(
       ValidationError,
     );
-    expect(
-      () => new BrowserPool(r.client, { blockResources: ["nope"] }),
-    ).toThrow(/unknown resource/);
+    expect(() => new BrowserPool(r.client, { blockResources: ["nope"] })).toThrow(
+      /unknown resource/,
+    );
     expect(
       () =>
         new BrowserPool(r.client, {
@@ -111,9 +107,7 @@ describe("capacity", () => {
 
   test("browsers() rejects a bad option, never throws synchronously", async () => {
     const r = rig();
-    await expect(r.client.browsers({ proxi: "x" } as never)).rejects.toThrow(
-      /proxi/,
-    );
+    await expect(r.client.browsers({ proxi: "x" } as never)).rejects.toThrow(/proxi/);
   });
 });
 
@@ -172,9 +166,7 @@ describe("lease", () => {
     expect(await leasing).toBe("sess-1"); // the handler still ran on it
     expect(r.warned[0]).toMatch(/could not clean up sess-1/);
     expect(r.stops().map((s) => s.path)).toEqual(["/profiles/sess-1/stop"]);
-    expect(await p.lease(async (browser) => browser.internalUuid)).toBe(
-      "sess-2",
-    );
+    expect(await p.lease(async (browser) => browser.internalUuid)).toBe("sess-2");
   });
 
   test("a dead idle browser is recycled on the next lease", async () => {
@@ -237,9 +229,7 @@ describe("lease", () => {
     });
     expect(r.warned[0]).toMatch(/could not clean up sess-1: .*broken/);
     expect(r.stops()).toHaveLength(1);
-    await p.lease(async (browser) =>
-      expect(browser.internalUuid).toBe("sess-2"),
-    );
+    await p.lease(async (browser) => expect(browser.internalUuid).toBe("sess-2"));
   });
 
   test("the handler's error propagates and the browser is kept", async () => {
@@ -355,14 +345,12 @@ describe("map", () => {
     );
     expect(outcomes.map((o) => o.index)).toEqual([0, 1, 2, 3, 4]);
     expect(outcomes.map((o) => o.item)).toEqual([1, 2, 3, 4, 5]);
-    expect(
-      outcomes.filter((o) => o.ok).map((o) => (o.ok ? o.value : "")),
-    ).toHaveLength(4);
+    expect(outcomes.filter((o) => o.ok).map((o) => (o.ok ? o.value : ""))).toHaveLength(
+      4,
+    );
     const failed = outcomes[2];
     expect(failed?.ok).toBe(false);
-    expect(failed && !failed.ok ? String(failed.error) : "").toBe(
-      "Error: bad 3",
-    );
+    expect(failed && !failed.ok ? String(failed.error) : "").toBe("Error: bad 3");
     expect(peak).toBe(2);
     expect(r.starts()).toHaveLength(2);
   });
@@ -379,9 +367,9 @@ describe("map", () => {
     );
     expect(outcomes.map((o) => o.item)).toEqual([1, 2]);
     expect(outcomes[1]?.ok).toBe(false);
-    expect(
-      outcomes[1] && !outcomes[1].ok ? outcomes[1].error : null,
-    ).toBeInstanceOf(StopRun);
+    expect(outcomes[1] && !outcomes[1].ok ? outcomes[1].error : null).toBeInstanceOf(
+      StopRun,
+    );
   });
 
   test("an empty run starts nothing", async () => {

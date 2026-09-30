@@ -111,8 +111,7 @@ export class BrowserPool implements AsyncDisposable {
     const { proxy } = sessionOptions;
     parseOneTimeStartRequest({
       ...sessionOptions,
-      proxy:
-        typeof proxy === "function" || isProxySource(proxy) ? undefined : proxy,
+      proxy: typeof proxy === "function" || isProxySource(proxy) ? undefined : proxy,
     });
     this.sessionOptions = sessionOptions;
   }
@@ -125,9 +124,7 @@ export class BrowserPool implements AsyncDisposable {
 
   #requireOpen(): Semaphore {
     if (this.#slots === undefined) {
-      throw new Error(
-        "the pool is not open: use `await client.browsers()` or `open()`",
-      );
+      throw new Error("the pool is not open: use `await client.browsers()` or `open()`");
     }
     return this.#slots;
   }
@@ -292,9 +289,7 @@ export class BrowserPool implements AsyncDisposable {
   }
 
   async #startBrowser(): Promise<Browser> {
-    const session = await this.#client.profiles.startOneTime(
-      this.sessionOptions,
-    );
+    const session = await this.#client.profiles.startOneTime(this.sessionOptions);
     let browser: Browser;
     try {
       browser = new Browser(session, {

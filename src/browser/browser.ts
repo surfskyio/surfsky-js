@@ -26,46 +26,39 @@ function isStartPage(url: string): boolean {
 }
 
 // CDP Network.ResourceType values
-export const RESOURCE_TYPES: Readonly<Record<string, string>> =
-  Object.fromEntries(
-    [
-      "Stylesheet",
-      "Image",
-      "Media",
-      "Font",
-      "Script",
-      "TextTrack",
-      "XHR",
-      "Fetch",
-      "Prefetch",
-      "EventSource",
-      "WebSocket",
-      "Manifest",
-      "SignedExchange",
-      "Ping",
-      "CSPViolationReport",
-      "Preflight",
-      "FedCM",
-      "Other",
-    ].map((name) => [name.toLowerCase(), name]),
-  );
+export const RESOURCE_TYPES: Readonly<Record<string, string>> = Object.fromEntries(
+  [
+    "Stylesheet",
+    "Image",
+    "Media",
+    "Font",
+    "Script",
+    "TextTrack",
+    "XHR",
+    "Fetch",
+    "Prefetch",
+    "EventSource",
+    "WebSocket",
+    "Manifest",
+    "SignedExchange",
+    "Ping",
+    "CSPViolationReport",
+    "Preflight",
+    "FedCM",
+    "Other",
+  ].map((name) => [name.toLowerCase(), name]),
+);
 
 export function normalizeBlocked(
   resources?: Iterable<string> | null,
 ): ReadonlySet<string> {
   if (typeof resources === "string") {
-    throw new TypeError(
-      "blockResources takes a list of resource types, not 1 string",
-    );
+    throw new TypeError("blockResources takes a list of resource types, not 1 string");
   }
-  const blocked = new Set(
-    [...(resources ?? [])].map((name) => name.toLowerCase()),
-  );
+  const blocked = new Set([...(resources ?? [])].map((name) => name.toLowerCase()));
   if (blocked.has("document"))
     throw new TypeError("blocking 'document' blocks the page itself");
-  const unknown = [...blocked]
-    .filter((name) => !(name in RESOURCE_TYPES))
-    .sort();
+  const unknown = [...blocked].filter((name) => !(name in RESOURCE_TYPES)).sort();
   if (unknown.length > 0) {
     const valid = Object.keys(RESOURCE_TYPES).sort();
     throw new TypeError(
@@ -75,9 +68,7 @@ export function normalizeBlocked(
   return blocked;
 }
 
-export function normalizeUrls(
-  patterns?: readonly string[] | null,
-): readonly string[] {
+export function normalizeUrls(patterns?: readonly string[] | null): readonly string[] {
   // "*.png" as a string would become "*", ".", "p"... and "*" blocks all
   if (typeof patterns === "string") {
     throw new TypeError("blockUrls takes a list of patterns, not 1 string");
@@ -173,8 +164,7 @@ export class Browser extends Page implements AsyncDisposable {
     const patterns: Record<string, unknown>[] = [...this.blockedResources]
       .sort()
       .map((name) => ({ urlPattern: "*", resourceType: RESOURCE_TYPES[name] }));
-    for (const pattern of this.blockedUrls)
-      patterns.push({ urlPattern: pattern });
+    for (const pattern of this.blockedUrls) patterns.push({ urlPattern: pattern });
     return patterns;
   }
 
@@ -184,10 +174,7 @@ export class Browser extends Page implements AsyncDisposable {
   }
 
   async newPage(): Promise<Page> {
-    const deadline = new Deadline(
-      this.commandTimeout,
-      "the new page did not open",
-    );
+    const deadline = new Deadline(this.commandTimeout, "the new page did not open");
     const created = await deadline.race(
       this.cdp.send("Target.createTarget", {
         url: "about:blank",
@@ -224,8 +211,7 @@ export class Browser extends Page implements AsyncDisposable {
   }
 
   async connect(): Promise<void> {
-    if (this.#client !== undefined)
-      throw new Error("browser is already connected");
+    if (this.#client !== undefined) throw new Error("browser is already connected");
     const handler = this.onDialog; // survives a reconnect
     this._reset("", "");
     this.onDialog = handler;
@@ -243,9 +229,7 @@ export class Browser extends Page implements AsyncDisposable {
       this.#client = client;
       await deadline.race(client.start());
       client.on("Target.attachedToTarget", (event) => this._onAttached(event));
-      client.on("Target.detachedFromTarget", (event) =>
-        this._onDetached(event),
-      );
+      client.on("Target.detachedFromTarget", (event) => this._onDetached(event));
       client.on(
         "Inspector.targetCrashed",
         this.#toPage((page) => this._drop(page)),
@@ -321,10 +305,7 @@ export class Browser extends Page implements AsyncDisposable {
     await withTimeout(
       this.cdp.send("Browser.getVersion"),
       timeout,
-      () =>
-        new BrowserTimeoutError(
-          `the browser did not answer within ${timeout}ms`,
-        ),
+      () => new BrowserTimeoutError(`the browser did not answer within ${timeout}ms`),
     );
   }
 
@@ -387,20 +368,13 @@ export class Browser extends Page implements AsyncDisposable {
     const timeout = this.commandTimeout;
     const detach = async () => {
       if (waiting)
-        await this.cdp.send(
-          "Runtime.runIfWaitingForDebugger",
-          undefined,
-          sessionId,
-        );
+        await this.cdp.send("Runtime.runIfWaitingForDebugger", undefined, sessionId);
       await this.cdp.send("Target.detachFromTarget", { sessionId });
     };
     await withTimeout(
       detach(),
       timeout,
-      () =>
-        new BrowserTimeoutError(
-          `the target did not let go within ${timeout}ms`,
-        ),
+      () => new BrowserTimeoutError(`the target did not let go within ${timeout}ms`),
     );
   }
 
@@ -422,9 +396,7 @@ export class Browser extends Page implements AsyncDisposable {
     }
   }
 
-  #toPage(
-    handler: (page: Page, event: Record<string, any>) => void,
-  ): EventHandler {
+  #toPage(handler: (page: Page, event: Record<string, any>) => void): EventHandler {
     return (event, sessionId) => {
       const page = this._pages.get(sessionId ?? "");
       if (page !== undefined) handler(page, event);

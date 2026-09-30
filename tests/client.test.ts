@@ -14,9 +14,7 @@ describe("connection", () => {
     process.env.SURFSKY_API_TOKEN = "";
     process.env.SURFSKY_API_BASE_URL = "";
     expect(() => new Surfsky()).toThrow(ConfigurationError);
-    expect(() => new Surfsky({ apiToken: "t" })).toThrow(
-      /SURFSKY_API_BASE_URL/,
-    );
+    expect(() => new Surfsky({ apiToken: "t" })).toThrow(/SURFSKY_API_BASE_URL/);
   });
 
   test("falls back to the environment and trims the slash", () => {
@@ -61,9 +59,7 @@ test("withOptions clones with overrides and shares fetch", async () => {
 });
 
 test("request returns the raw response without throwing", async () => {
-  const { client, requests } = testClient([
-    { status: 404, json: { msg: "no" } },
-  ]);
+  const { client, requests } = testClient([{ status: 404, json: { msg: "no" } }]);
   const response = await client.request("GET", "/whatever", {
     params: { a: 1 },
     headers: { "X-One": "1" },
@@ -183,9 +179,7 @@ describe("browser", () => {
     await expect(client.browser({ blockResources: ["nope"] })).rejects.toThrow(
       /unknown resource/,
     );
-    await expect(client.browser({ proxi: 1 } as never)).rejects.toThrow(
-      /proxi/,
-    );
+    await expect(client.browser({ proxi: 1 } as never)).rejects.toThrow(/proxi/);
     expect(requests).toHaveLength(0);
   });
 
@@ -198,9 +192,9 @@ describe("browser", () => {
     chrome.respond("Target.setAutoAttach", () => ({
       error: { message: "refused" },
     }));
-    await expect(
-      client.browser({ createWebSocket: chrome.create }),
-    ).rejects.toThrow("refused");
+    await expect(client.browser({ createWebSocket: chrome.create })).rejects.toThrow(
+      "refused",
+    );
     expect(requests.map((r) => r.path)).toEqual([
       "/profiles/one_time",
       "/profiles/s1/stop",
@@ -212,20 +206,17 @@ describe("signal", () => {
   test("an aborted start never asks the server", async () => {
     const { client, requests } = testClient([]);
     const reason = new Error("stop");
-    await expect(
-      client.session({ signal: AbortSignal.abort(reason) }),
-    ).rejects.toBe(reason);
-    await expect(
-      client.browser({ signal: AbortSignal.abort(reason) }),
-    ).rejects.toBe(reason);
+    await expect(client.session({ signal: AbortSignal.abort(reason) })).rejects.toBe(
+      reason,
+    );
+    await expect(client.browser({ signal: AbortSignal.abort(reason) })).rejects.toBe(
+      reason,
+    );
     expect(requests).toHaveLength(0);
   });
 
   test("an abort during the start POST stops the session it created", async () => {
-    const fake = fakeFetch([
-      ok({ internal_uuid: "s1", ws_url: "ws://x" }),
-      ok(null),
-    ]);
+    const fake = fakeFetch([ok({ internal_uuid: "s1", ws_url: "ws://x" }), ok(null)]);
     const ac = new AbortController();
     const client = new Surfsky({
       apiToken: "t",
