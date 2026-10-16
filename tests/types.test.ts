@@ -134,6 +134,17 @@ describe("session start requests", () => {
     });
   });
 
+  test("anti_captcha rides on both start requests", () => {
+    const anti_captcha = { enabled: true, auto_captcha_types: ["datadome_click"] };
+    expect(parseOneTimeStartRequest({ anti_captcha })).toEqual({ anti_captcha });
+    expect(parseProfileStartRequest({ anti_captcha })).toEqual({ anti_captcha });
+    expect(() =>
+      parseOneTimeStartRequest({
+        anti_captcha: { auto_captcha_types: ["datadome_slider"] },
+      }),
+    ).toThrow(/anti_captcha\.auto_captcha_types\[0\]/);
+  });
+
   test("a typo is named whatever its value is", () => {
     // dropping nulls before the parse would have taken the unknown key with them
     expect(() => parseOneTimeStartRequest({ proxi: null })).toThrow(/"proxi"/);

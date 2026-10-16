@@ -30,6 +30,21 @@ const regionalPool = z.enum([
   "mena",
 ]);
 
+const captchaType = z.enum([
+  "recaptcha",
+  "hcaptcha",
+  "turnstile",
+  "perimeterx",
+  "geetest",
+  "bls",
+  "datadome",
+  "datadome_audio",
+  "datadome_click",
+  "click",
+  "image",
+  "funcaptcha",
+]);
+
 export type OS = z.infer<typeof os>;
 export type Arch = z.infer<typeof arch>;
 export type DeviceType = z.infer<typeof deviceType>;
@@ -37,6 +52,7 @@ export type WaitUntil = z.infer<typeof waitUntil>;
 export type ProxyType = z.infer<typeof proxyType>;
 export type ProfileOrdering = z.infer<typeof profileOrdering>;
 export type RegionalPool = z.infer<typeof regionalPool>;
+export type CaptchaType = z.infer<typeof captchaType>;
 export type ExportFormat = "json" | "netscape";
 export type MouseButton = "left" | "right" | "middle";
 export type KeyModifier = "Alt" | "Control" | "Meta" | "Shift";
@@ -122,6 +138,16 @@ const browserSettings = z.strictObject({
 });
 
 export type BrowserSettings = z.infer<typeof browserSettings>;
+
+const antiCaptcha = z.strictObject({
+  enabled: z.boolean().optional(),
+  auto_captcha_types: z.array(captchaType).optional(),
+  gemini_api_key: z.string().optional(),
+  disable_external_providers: z.boolean().optional(),
+  external_providers_initially_enabled: z.boolean().optional(),
+});
+
+export type AntiCaptcha = z.infer<typeof antiCaptcha>;
 
 const shared = z.strictObject({
   tier: z.literal("shared"),
@@ -209,6 +235,7 @@ const oneTimeStartRequest = z.strictObject({
   fingerprint: fingerprint.optional(),
   proxy: proxyLike.nullish(),
   browser_settings: browserSettings.optional(),
+  anti_captcha: antiCaptcha.optional(),
   enable_chromedriver: z.boolean().optional(),
   extensions: z.array(z.string()).max(5).optional(),
   proxy_blacklist: z.array(z.string()).optional(),
