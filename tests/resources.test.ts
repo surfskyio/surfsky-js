@@ -115,16 +115,9 @@ describe("account", () => {
   });
 
   test("limits", async () => {
-    const { client, requests } = testClient([
-      ok({ spm: 5 }),
-      ok({ parallel_browsers: 3 }),
-    ]);
-    expect(await client.account.sessionLimits()).toEqual({ spm: 5 });
+    const { client, requests } = testClient([ok({ parallel_browsers: 3 })]);
     expect(await client.account.browserLimits()).toEqual({ parallel_browsers: 3 });
-    expect(requests.map((r) => r.path)).toEqual([
-      "/users/session-limits",
-      "/users/browser-limits",
-    ]);
+    expect(requests.map((r) => r.path)).toEqual(["/users/browser-limits"]);
   });
 
   test("maxBrowsers: env, then the plan, then the default", async () => {

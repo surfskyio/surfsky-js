@@ -1,13 +1,9 @@
 import type { Surfsky } from "../client.js";
 import { NotFoundError } from "../errors.js";
 import type { Spec } from "../transport.js";
-import type { BrowserLimits, SessionLimits } from "../types.js";
+import type { BrowserLimits } from "../types.js";
 
 export const DEFAULT_MAX_BROWSERS = 10;
-
-export function sessionLimitsSpec(): Spec<SessionLimits> {
-  return { method: "GET", path: "/users/session-limits" };
-}
 
 export function browserLimitsSpec(): Spec<BrowserLimits> {
   return { method: "GET", path: "/users/browser-limits" };
@@ -23,10 +19,6 @@ export class Account {
 
   constructor(client: Surfsky) {
     this.client = client;
-  }
-
-  async sessionLimits(): Promise<SessionLimits> {
-    return this.client.call(sessionLimitsSpec());
   }
 
   async browserLimits(): Promise<BrowserLimits> {

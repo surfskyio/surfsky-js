@@ -179,7 +179,7 @@ is accepted.
 | `client.proxies` | `countries()`, `regions(country)`, `cities(country, region)`, `quota()`, `premiumStats()`, `sharedCountries()`, `sharedQuota()`, `sharedStats()`. The first four need a premium provider on the account. |
 | `client.fingerprints` | `renderers(os, osArch)`, `screens(os, osArch)`, `deviceModels({ os, os_arch, os_version, device_type })` |
 | `client.extensions` | `upload(file, name)` (path, bytes or Blob, zip up to 100 MB), `listAll()`, `get(uuid)`, `update(uuid, { name })`, `delete(uuid)` |
-| `client.account` | `sessionLimits()`, `browserLimits()`, `maxBrowsers()` |
+| `client.account` | `browserLimits()`, `maxBrowsers()` |
 
 ## Errors
 

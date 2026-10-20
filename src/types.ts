@@ -501,15 +501,6 @@ export interface Extension {
   updated_at?: string | null;
 }
 
-export interface SessionLimits {
-  has_session_limits?: boolean | null;
-  spm?: number | null;
-  remaining?: number | null;
-  used?: number | null;
-  additional_spm?: number | null;
-  reset_time?: number | null;
-}
-
 export interface BrowserLimits {
   has_browser_limits?: boolean | null;
   parallel_browsers?: number | null;
