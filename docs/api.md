@@ -20,7 +20,7 @@ milliseconds, default 30 000, and throw `BrowserTimeoutError`.
 
 Session options: `fingerprint`, `proxy`, `browser_settings`
 (`inactive_kill_timeout`, `cache_enabled`, `cache_key`), `anti_captcha` (`enabled`,
-`auto_captcha_types`, `gemini_api_key`, `disable_external_providers`,
+`auto_captcha_types`, `disable_external_providers`,
 `external_providers_initially_enabled`), `enable_chromedriver`,
 `extensions` (up to 5 uuids), `proxy_blacklist`, `domain_routes`, `cookies`.
 `fingerprint` and `cookies` apply to one-time sessions only. Requests are
@@ -28,9 +28,19 @@ validated with [zod](https://zod.dev) before they leave: an unknown key, a
 bad range or an impossible proxy targeting throws `ValidationError`, so a typo
 never starts a billed session.
 
-With `anti_captcha` on, the cloud's `Captcha` CDP domain solves through `send`:
-`Captcha.solve` (`{ type: "datadome_click", timeout: 60000 }`) on a page showing one,
-or `Captcha.autoSolve` before navigating for the `auto_captcha_types`.
+With `anti_captcha` on, the cloud's `Captcha` CDP domain solves through `send`.
+`Captcha.solve` (`{ type: "datadome_click", timeout: 60000 }`) solves the captcha on
+the page; `Captcha.autoSolve` before navigating solves the `auto_captcha_types` as
+they show. `options.selector` names the widget when the page has several; `image`
+requires it (the picture's CSS selector) and takes `options.input`, the field to type
+the answer into. The reply has `status`, `type`, `solution` (token or text) and
+`usage`, the solve's cost; `Captcha.solveCompleted` and `Captcha.solveFailed` events
+carry the same, `browser.cdp.on(event, handler)` subscribes to them with
+`handler(params, sessionId)`. On wallet-billed plans every paid solve is charged to
+the wallet, `usage.cost_usd` is the amount, and `recaptcha`, `geetest` and `aws_waf`
+are auto-solved only when `auto_captcha_types` names them. Reserved plans are not
+charged. Left out, `auto_captcha_types` is the cloud's default list (`recaptcha`, `hcaptcha`,
+`geetest`, `turnstile`, `bls`, `perimeterx`, `datadome`, `datadome_audio`).
 
 `logger` takes `{ debug, info, warn, error }` (any subset). By default warnings
 and errors go to the console; `logger: null` silences the SDK.

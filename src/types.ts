@@ -36,6 +36,7 @@ const captchaType = z.enum([
   "turnstile",
   "perimeterx",
   "geetest",
+  "aws_waf",
   "bls",
   "datadome",
   "datadome_audio",
