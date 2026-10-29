@@ -237,3 +237,51 @@ test("scrape validates, posts and uses the long timeout", async () => {
     ValidationError,
   );
 });
+
+test("client.scrape posts one object to /scrape", async () => {
+  const data = {
+    url: "https://x",
+    final_url: "https://x/en",
+    title: "X",
+    markdown: "# X",
+  };
+  const { client, requests } = testClient([ok(data)]);
+  const got = await client.scrape("https://x", {
+    formats: ["markdown", "links"],
+    screenshot_options: { full_page: false, format: "jpeg" },
+    actions: [
+      { type: "click", selector: "#more" },
+      { type: "wait", ms: 500 },
+    ],
+    auto_captcha_solve: "auto",
+    block_resources: [],
+  });
+  expect(got).toEqual(data);
+  expect(requests[0]?.method).toBe("POST");
+  expect(requests[0]?.path).toBe("/scrape");
+  expect(requests[0]?.body).toEqual({
+    url: "https://x",
+    formats: ["markdown", "links"],
+    screenshot_options: { full_page: false, format: "jpeg" },
+    actions: [
+      { type: "click", selector: "#more" },
+      { type: "wait", ms: 500 },
+    ],
+    auto_captcha_solve: "auto",
+    block_resources: [], // [] blocks nothing; absent is the server default
+  });
+});
+
+test("a failed scrape carries its code and the page it was left on", async () => {
+  const body = {
+    success: false,
+    msg: "Timeout during waiting for selector",
+    data: { content: "<p>half</p>" },
+    code: "selector_timeout",
+  };
+  const { client } = testClient([{ status: 400, json: body }]);
+  const err = await client.scrape("https://x", { wait_for: "#late" }).catch((e) => e);
+  expect(err).toBeInstanceOf(BadRequestError);
+  expect(err.code).toBe("selector_timeout");
+  expect(err.body.data.content).toBe("<p>half</p>");
+});

@@ -280,15 +280,54 @@ const listPageRequest = z.strictObject({
   ordering: profileOrdering.optional(),
 });
 
+const scrapeFormat = z.enum(["html", "raw_html", "markdown", "links", "screenshot"]);
+
+const scrapeAction = z.discriminatedUnion("type", [
+  z.strictObject({ type: z.literal("click"), selector: z.string() }),
+  z.strictObject({ type: z.literal("type"), selector: z.string(), text: z.string() }),
+  z.strictObject({ type: z.literal("press"), key: z.string() }),
+  /** One of `selector` and `direction`. */
+  z.strictObject({
+    type: z.literal("scroll"),
+    selector: z.string().optional(),
+    direction: z.enum(["up", "down"]).optional(),
+  }),
+  /** One of `ms` and `selector`. */
+  z.strictObject({
+    type: z.literal("wait"),
+    ms: z.number().int().min(0).max(60_000).optional(),
+    selector: z.string().optional(),
+  }),
+]);
+
 const scrapeRequest = z.strictObject({
   url: z.string(),
+  /** Default `["html"]`. */
+  formats: z.array(scrapeFormat).optional(),
+  /** Default true; applies to `html` and `markdown`. */
+  only_main_content: z.boolean().optional(),
   screenshot: z.boolean().optional(),
+  screenshot_options: z
+    .strictObject({
+      full_page: z.boolean().optional(),
+      format: z.enum(["png", "jpeg"]).optional(),
+      /** 1-100, jpeg only. */
+      quality: z.number().int().min(1).max(100).optional(),
+    })
+    .optional(),
+  /** Set before navigation. */
+  cookies: cookieInput.optional(),
   /** Seconds, 0-60. */
   wait: z.number().min(0).max(60).optional(),
   wait_until: waitUntil.optional(),
   wait_for: z.string().optional(),
-  /** 0-3. */
-  human_actions: z.number().int().min(0).max(3).optional(),
+  /** Milliseconds, as the API takes it. Default 30_000. */
+  timeout: z.number().int().positive().optional(),
+  /** `"auto"` (default) solves only on a blocked page; `true` also on an open page. */
+  auto_captcha_solve: z.union([z.boolean(), z.literal("auto")]).optional(),
+  actions: z.array(scrapeAction).max(10).optional(),
+  /** Absent: the server default; `[]` blocks nothing. */
+  block_resources: z.array(z.enum(["image", "media", "font", "stylesheet"])).optional(),
 });
 
 export type OneTimeStartRequest = z.infer<typeof oneTimeStartRequest>;
@@ -298,6 +337,8 @@ export type ProfileCreateRequest = z.infer<typeof profileCreateRequest>;
 export type ProfileUpdateRequest = z.input<typeof profileUpdateRequest>;
 export type ListPageRequest = z.infer<typeof listPageRequest>;
 export type ScrapeRequest = z.infer<typeof scrapeRequest>;
+export type ScrapeFormat = z.infer<typeof scrapeFormat>;
+export type ScrapeAction = z.infer<typeof scrapeAction>;
 
 type Parser<T> = (value: unknown) => T;
 
@@ -406,13 +447,30 @@ export interface Cookie {
   secure?: boolean | null;
 }
 
+export interface ScrapeMetadata {
+  description?: string | null;
+  language?: string | null;
+  canonical_url?: string | null;
+  og_title?: string | null;
+  og_description?: string | null;
+  og_image?: string | null;
+}
+
 export interface ScrapeResult {
   url?: string | null;
+  final_url?: string | null;
   status?: number | null;
   status_text?: string | null;
-  content?: string | null;
+  title?: string | null;
+  content_type?: string | null;
+  metadata?: ScrapeMetadata | null;
   cookies?: Cookie[] | null;
-  /** base64 PNG when requested */
+  /** The `html` format: cleaned HTML. */
+  content?: string | null;
+  raw_html?: string | null;
+  markdown?: string | null;
+  links?: string[] | null;
+  /** base64 PNG or JPEG */
   screenshot?: string | null;
 }
 

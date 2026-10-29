@@ -10,6 +10,7 @@ milliseconds, default 30 000, and throw `BrowserTimeoutError`.
 
 | Method | Description |
 | --- | --- |
+| `scrape(url, options)` | One page from the cloud's pre-started browsers (`POST /scrape`): no session to start or stop. Returns `ScrapeResult`. |
 | `session({ profileUuid, signal, ...options })` | Start a session. Returns the `Session` (`internal_uuid`, `ws_url`) with `stop()` and `await using` support. An abort of `signal` stops the session the start created. |
 | `browser({ profileUuid, blockResources, blockUrls, connectTimeout, commandTimeout, signal, ...options })` | Start a session and connect a `Browser`. `close()` stops both, and so does an abort of `signal`. |
 | `browsers({ concurrency: "auto", blockResources, blockUrls, ...options })` | An open `BrowserPool`. `close()` stops every browser. |
@@ -40,6 +41,29 @@ carry the same, `browser.cdp.on(event, handler)` subscribes to them with
 the wallet and `usage.cost_usd` is the amount. Reserved plans are not charged. Left
 out, `types` is the cloud's default list (`recaptcha`, `hcaptcha`, `geetest`,
 `turnstile`, `perimeterx`, `datadome`, `datadome_audio`).
+
+Scrape options, the same for `client.scrape(url, options)` and
+`client.profiles.scrape(session, url, options)`, keep the API's snake_case and units:
+`formats` (`html`, `raw_html`, `markdown`, `links`, `screenshot`; default `["html"]`),
+`only_main_content` (default `true`, applies to `html` and `markdown`),
+`screenshot_options` (`{ full_page: true, format: "png" | "jpeg", quality }`), `cookies`
+(set before navigation), `wait` (seconds), `wait_until`, `wait_for`, `timeout`
+(milliseconds, default 30 000), `auto_captcha_solve` (`"auto"`, the default, solves only on
+a blocked page answering 403, 405, 429 or 503; `true` also solves widgets on an open page,
+which can add 10 to 60 seconds and costs a captcha charge per solve; `false`), `actions`
+(up to 10 of `{ type: "click", selector }`, `{ type: "type", selector, text }`,
+`{ type: "press", key }`, `{ type: "scroll", selector }` or `{ type: "scroll", direction }`,
+`{ type: "wait", ms }` or `{ type: "wait", selector }`, run with human emulation) and
+`block_resources` (absent blocks images, media and fonts unless a screenshot is requested
+or `auto_captcha_solve` is `true`; `[]` blocks nothing). The server gives a scrape 120
+seconds. `ScrapeResult` has `url`, `final_url`, `status`, `status_text`, `title`,
+`content_type`, `metadata` (`description`, `language`, `canonical_url`, `og_*`),
+`cookies`, and a field per requested format: `content` (cleaned `html`), `raw_html`,
+`markdown`, `links` (absolute URLs), `screenshot` (base64). A scrape that fails throws
+`BadRequestError` whose `code` names the cause (`page_load_timeout`, `selector_timeout`,
+`site_unreachable`, `action_failed`, `captcha_solve_failed`, `captcha_solve_timeout`,
+`scrape_timeout`, `scrape_error`) and whose `body.data` can carry the `content` and
+`screenshot` of the page the browser was left on.
 
 `logger` takes `{ debug, info, warn, error }` (any subset). By default warnings
 and errors go to the console; `logger: null` silences the SDK.
@@ -174,7 +198,7 @@ is accepted.
 
 | Namespace | Methods |
 | --- | --- |
-| `client.profiles` | `startOneTime(options)`, `start(uuid, options)`, `stop(session)`, `stopAll()`, `listActive()`, `create({ title, fingerprint, description, proxy, cookies, storage_options })`, `get(uuid)`, `update(uuid, fields)`, `delete(uuid)`, `deleteMany(uuids)`, `listPage({ page, page_len, ordering })`, `iterAll({ page_len, ordering })`, `exportCookies(uuid, { export_format })`, `importCookies(uuid, cookies)`, `scrape(session, url, { screenshot, wait, wait_until, wait_for, human_actions })` |
+| `client.profiles` | `startOneTime(options)`, `start(uuid, options)`, `stop(session)`, `stopAll()`, `listActive()`, `create({ title, fingerprint, description, proxy, cookies, storage_options })`, `get(uuid)`, `update(uuid, fields)`, `delete(uuid)`, `deleteMany(uuids)`, `listPage({ page, page_len, ordering })`, `iterAll({ page_len, ordering })`, `exportCookies(uuid, { export_format })`, `importCookies(uuid, cookies)`, `scrape(session, url, options)` |
 | `client.proxies` | `countries()`, `regions(country)`, `cities(country, region)`, `quota()`, `premiumStats()`, `sharedCountries()`, `sharedQuota()`, `sharedStats()`. The first four need a premium provider on the account. |
 | `client.fingerprints` | `renderers(os, osArch)`, `screens(os, osArch)`, `deviceModels({ os, os_arch, os_version, device_type })` |
 | `client.extensions` | `upload(file, name)` (path, bytes or Blob, zip up to 100 MB), `listAll()`, `get(uuid)`, `update(uuid, { name })`, `delete(uuid)` |

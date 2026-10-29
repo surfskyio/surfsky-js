@@ -42,6 +42,7 @@ export type ScrapeOptions = Omit<ScrapeRequest, "url">;
 
 export type ListPageOptions = ListPageRequest;
 
+// the server gives a scrape up to 120s
 export const SCRAPE_TIMEOUT = 150_000;
 
 function sessionUuid(session: Session | string): string {
@@ -161,13 +162,14 @@ export function importCookiesSpec(uuid: string, cookies: string | Cookie[]): Spe
   };
 }
 
+/** `null` is `POST /scrape`, served by the cloud's pre-started browsers. */
 export function scrapeSpec(
-  session: Session | string,
+  session: Session | string | null,
   request: ScrapeRequest,
 ): Spec<ScrapeResult> {
   return {
     method: "POST",
-    path: `/profiles/${sessionUuid(session)}/scrape`,
+    path: session === null ? "/scrape" : `/profiles/${sessionUuid(session)}/scrape`,
     json: parseScrapeRequest(request),
     timeout: SCRAPE_TIMEOUT,
   };

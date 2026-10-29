@@ -11,12 +11,12 @@ import { ConfigurationError } from "./errors.js";
 import { Account } from "./resources/account.js";
 import { Extensions } from "./resources/extensions.js";
 import { Fingerprints } from "./resources/fingerprints.js";
-import type { SessionOptions } from "./resources/profiles.js";
-import { Profiles, stopSession } from "./resources/profiles.js";
+import type { ScrapeOptions, SessionOptions } from "./resources/profiles.js";
+import { Profiles, scrapeSpec, stopSession } from "./resources/profiles.js";
 import { Proxies } from "./resources/proxies.js";
 import type { Logger, Params, Spec } from "./transport.js";
 import { AUTH_HEADER, makeLogger, result, send } from "./transport.js";
-import type { Session } from "./types.js";
+import type { ScrapeResult, Session } from "./types.js";
 import { VERSION } from "./version.js";
 
 export interface SurfskyOptions {
@@ -164,6 +164,11 @@ export class Surfsky implements AsyncDisposable {
       timeout: this.timeout,
       logger: this.logger,
     });
+  }
+
+  /** One page from the cloud's pre-started browsers: no session to start or stop. */
+  async scrape(url: string, options: ScrapeOptions = {}): Promise<ScrapeResult> {
+    return this.call(scrapeSpec(null, { url, ...options }));
   }
 
   /** Start a session; `stop()` it (or `await using`) so it does not keep billing. */

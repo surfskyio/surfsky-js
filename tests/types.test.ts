@@ -222,12 +222,16 @@ test("a model type is closed even though its schema is not", () => {
 
 test("scrape ranges", () => {
   expect(() => parseScrapeRequest({ url: "u", wait: 61 })).toThrow(/wait/);
-  expect(() => parseScrapeRequest({ url: "u", human_actions: 4 })).toThrow(
-    /human_actions/,
+  expect(() => parseScrapeRequest({ url: "u", human_actions: 1 })).toThrow(
+    /"human_actions"/,
   );
-  expect(parseScrapeRequest({ url: "u", wait: 60, human_actions: 3 })).toEqual({
-    url: "u",
-    wait: 60,
-    human_actions: 3,
-  });
+  expect(() =>
+    parseScrapeRequest({ url: "u", actions: [{ type: "evaluate", js: "1" }] }),
+  ).toThrow(/actions/);
+  expect(() =>
+    parseScrapeRequest({ url: "u", screenshot_options: { quality: 0 } }),
+  ).toThrow(/quality/);
+  expect(
+    parseScrapeRequest({ url: "u", wait: 60, auto_captcha_solve: true, timeout: 5_000 }),
+  ).toEqual({ url: "u", wait: 60, auto_captcha_solve: true, timeout: 5_000 });
 });
