@@ -253,7 +253,7 @@ test("client.scrape posts one object to /scrape", async () => {
       { type: "click", selector: "#more" },
       { type: "wait", ms: 500 },
     ],
-    auto_captcha_solve: "auto",
+    auto_captcha_solve: false,
     block_resources: [],
   });
   expect(got).toEqual(data);
@@ -267,7 +267,7 @@ test("client.scrape posts one object to /scrape", async () => {
       { type: "click", selector: "#more" },
       { type: "wait", ms: 500 },
     ],
-    auto_captcha_solve: "auto",
+    auto_captcha_solve: false,
     block_resources: [], // [] blocks nothing; absent is the server default
   });
 });

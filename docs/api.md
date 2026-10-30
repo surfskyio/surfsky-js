@@ -48,9 +48,9 @@ Scrape options, the same for `client.scrape(url, options)` and
 `only_main_content` (default `true`, applies to `html` and `markdown`),
 `screenshot_options` (`{ full_page: true, format: "png" | "jpeg", quality }`), `cookies`
 (set before navigation), `wait` (seconds), `wait_until`, `wait_for`, `timeout`
-(milliseconds, default 30 000), `auto_captcha_solve` (`"auto"`, the default, solves only on
-a blocked page answering 403, 405, 429 or 503; `true` also solves widgets on an open page,
-which can add 10 to 60 seconds and costs a captcha charge per solve; `false`), `actions`
+(milliseconds, default 30 000), `auto_captcha_solve` (default `true`, solves the challenge of
+a blocked page answering 403, 405, 429 or 503, which can add 10 to 60 seconds and costs a
+captcha charge per solve; `false` returns the block page as it is), `actions`
 (up to 10 of `{ type: "click", selector }`, `{ type: "type", selector, text }`,
 `{ type: "press", key }`, `{ type: "scroll", selector }` or `{ type: "scroll", direction }`,
 `{ type: "wait", ms }` or `{ type: "wait", selector }`, run with human emulation) and

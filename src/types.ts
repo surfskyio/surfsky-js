@@ -323,8 +323,8 @@ const scrapeRequest = z.strictObject({
   wait_for: z.string().optional(),
   /** Milliseconds, as the API takes it. Default 30_000. */
   timeout: z.number().int().positive().optional(),
-  /** `"auto"` (default) solves only on a blocked page; `true` also on an open page. */
-  auto_captcha_solve: z.union([z.boolean(), z.literal("auto")]).optional(),
+  /** `true` (the server default) solves the challenge of a blocked page; `false` returns it as it is. */
+  auto_captcha_solve: z.boolean().optional(),
   actions: z.array(scrapeAction).max(10).optional(),
   /** Absent: the server default; `[]` blocks nothing. */
   block_resources: z.array(z.enum(["image", "media", "font", "stylesheet"])).optional(),
