@@ -44,7 +44,7 @@ out, `types` is the cloud's default list (`recaptcha`, `hcaptcha`, `geetest`,
 
 Scrape options, the same for `client.scrape(url, options)` and
 `client.profiles.scrape(session, url, options)`, keep the API's snake_case and units:
-`formats` (`html`, `raw_html`, `markdown`, `links`, `screenshot`; default `["html"]`),
+`formats` (`html`, `raw_html`, `markdown`, `links`, `screenshot`, `cookies`; default `["html"]`),
 `only_main_content` (default `true`, applies to `html` and `markdown`),
 `screenshot_options` (`{ full_page: true, format: "png" | "jpeg", quality }`), `cookies`
 (set before navigation), `wait` (seconds), `wait_until`, `wait_for`, `timeout`
@@ -57,9 +57,10 @@ captcha charge per solve; `false` returns the block page as it is), `actions`
 `block_resources` (absent blocks images, media and fonts unless a screenshot is requested
 or `auto_captcha_solve` is `true`; `[]` blocks nothing). The server gives a scrape 120
 seconds. `ScrapeResult` has `url`, `final_url`, `status`, `status_text`, `title`,
-`content_type`, `metadata` (`description`, `language`, `canonical_url`, `og_*`),
-`cookies`, and a field per requested format: `content` (cleaned `html`), `raw_html`,
-`markdown`, `links` (absolute URLs), `screenshot` (base64). A scrape that fails throws
+`content_type`, `metadata` (`description`, `language`, `canonical_url`, `og_*`), and a
+field per requested format: `content` (cleaned `html`), `raw_html`, `markdown`, `links`
+(absolute URLs), `screenshot` (base64), `cookies` (the jar after the scrape, accepted as
+`cookies` of the next request). A scrape that fails throws
 `BadRequestError` whose `code` names the cause (`page_load_timeout`, `selector_timeout`,
 `site_unreachable`, `action_failed`, `captcha_solve_failed`, `captcha_solve_timeout`,
 `scrape_timeout`, `scrape_error`) and whose `body.data` can carry the `content` and

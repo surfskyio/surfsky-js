@@ -280,7 +280,14 @@ const listPageRequest = z.strictObject({
   ordering: profileOrdering.optional(),
 });
 
-const scrapeFormat = z.enum(["html", "raw_html", "markdown", "links", "screenshot"]);
+const scrapeFormat = z.enum([
+  "html",
+  "raw_html",
+  "markdown",
+  "links",
+  "screenshot",
+  "cookies",
+]);
 
 const scrapeAction = z.discriminatedUnion("type", [
   z.strictObject({ type: z.literal("click"), selector: z.string() }),
