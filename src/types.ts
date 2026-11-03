@@ -305,6 +305,8 @@ const scrapeAction = z.discriminatedUnion("type", [
     ms: z.number().int().min(0).max(60_000).optional(),
     selector: z.string().optional(),
   }),
+  /** Runs even with `auto_captcha_solve: false`. */
+  z.strictObject({ type: z.literal("solve") }),
 ]);
 
 const scrapeRequest = z.strictObject({
@@ -330,7 +332,7 @@ const scrapeRequest = z.strictObject({
   wait_for: z.string().optional(),
   /** Milliseconds, as the API takes it. Default 30_000. */
   timeout: z.number().int().positive().optional(),
-  /** `true` (the server default) solves the challenge of a blocked page; `false` returns it as it is. */
+  /** `true` (the server default) solves every captcha the scrape finds; `false` solves none. */
   auto_captcha_solve: z.boolean().optional(),
   actions: z.array(scrapeAction).max(10).optional(),
   /** Absent: the server default; `[]` blocks nothing. */
@@ -463,6 +465,15 @@ export interface ScrapeMetadata {
   og_image?: string | null;
 }
 
+export interface ScrapeChallenge {
+  kind: Loose<"challenge_page" | "block_page" | "page_captcha">;
+  /** null when the page has no captcha widget. */
+  captcha: Loose<CaptchaType> | null;
+  solved: boolean;
+  /** Total captcha charge of the request as a decimal string, "0" if none. */
+  cost: string;
+}
+
 export interface ScrapeResult {
   url?: string | null;
   final_url?: string | null;
@@ -471,6 +482,8 @@ export interface ScrapeResult {
   title?: string | null;
   content_type?: string | null;
   metadata?: ScrapeMetadata | null;
+  /** The last challenge page, block page or page captcha the scrape found. */
+  challenge?: ScrapeChallenge | null;
   cookies?: Cookie[] | null;
   /** The `html` format: cleaned HTML. */
   content?: string | null;

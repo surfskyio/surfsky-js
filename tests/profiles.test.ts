@@ -244,6 +244,12 @@ test("client.scrape posts one object to /scrape", async () => {
     final_url: "https://x/en",
     title: "X",
     markdown: "# X",
+    challenge: {
+      kind: "challenge_page",
+      captcha: "turnstile",
+      solved: true,
+      cost: "0.002",
+    },
   };
   const { client, requests } = testClient([ok(data)]);
   const got = await client.scrape("https://x", {

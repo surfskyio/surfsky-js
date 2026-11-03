@@ -48,21 +48,27 @@ Scrape options, the same for `client.scrape(url, options)` and
 `only_main_content` (default `true`, applies to `html` and `markdown`),
 `screenshot_options` (`{ full_page: true, format: "png" | "jpeg", quality }`), `cookies`
 (set before navigation), `wait` (seconds), `wait_until`, `wait_for`, `timeout`
-(milliseconds, default 30 000), `auto_captcha_solve` (default `true`, solves the challenge of
-a blocked page answering 403, 405, 429 or 503, which can add 10 to 60 seconds and costs a
-captcha charge per solve; `false` returns the block page as it is), `actions`
-(up to 10 of `{ type: "click", selector }`, `{ type: "type", selector, text }`,
-`{ type: "press", key }`, `{ type: "scroll", selector }` or `{ type: "scroll", direction }`,
-`{ type: "wait", ms }` or `{ type: "wait", selector }`, run with human emulation) and
-`block_resources` (absent blocks images, media and fonts unless a screenshot is requested
-or `auto_captcha_solve` is `true`; `[]` blocks nothing). The server gives a scrape 120
-seconds. `ScrapeResult` has `url`, `final_url`, `status`, `status_text`, `title`,
-`content_type`, `metadata` (`description`, `language`, `canonical_url`, `og_*`), and a
-field per requested format: `content` (cleaned `html`), `raw_html`, `markdown`, `links`
-(absolute URLs), `screenshot` (base64), `cookies` (the jar after the scrape, accepted as
-`cookies` of the next request). A scrape that fails throws
-`BadRequestError` whose `code` names the cause (`page_load_timeout`, `selector_timeout`,
-`site_unreachable`, `action_failed`, `captcha_solve_failed`, `captcha_solve_timeout`,
+(milliseconds, default 30 000), `auto_captcha_solve` (default `true`, solves every captcha
+the scrape finds, on a challenge page or on the page itself, paid types included; a solve
+can add 10 to 60 seconds and costs a captcha charge; `false` solves none and still reports
+`challenge`), `actions` (up to 10 of `{ type: "click", selector }`,
+`{ type: "type", selector, text }`, `{ type: "press", key }`, `{ type: "scroll", selector }`
+or `{ type: "scroll", direction }`, `{ type: "wait", ms }` or `{ type: "wait", selector }`,
+run with human emulation, and `{ type: "solve" }`, which solves the captcha on the page at
+that step even with `auto_captcha_solve: false`) and `block_resources` (absent blocks
+images, media and fonts unless a screenshot is requested, and unblocks them before a captcha
+solve; `[]` blocks nothing). The server gives a scrape 120 seconds. `ScrapeResult` has
+`url`, `final_url`, `status`, `status_text`, `title`, `content_type`, `metadata`
+(`description`, `language`, `canonical_url`, `og_*`), and a field per requested format:
+`content` (cleaned `html`), `raw_html`, `markdown`, `links` (absolute URLs), `screenshot`
+(base64), `cookies` (the jar after the scrape, accepted as `cookies` of the next request).
+`challenge` is `null` or the last challenge page, block page or page captcha the scrape
+found: `kind` (`challenge_page`, `block_page` or `page_captcha`), `captcha` (the provider
+type, `null` without a widget), `solved` (`true` once the page behind a challenge page
+loaded or the page captcha was solved, `false` if it was still there at the end; an unsolved
+captcha does not throw) and `cost` (the request's total captcha charge as a decimal string,
+`"0"` if none). A scrape that fails throws `BadRequestError` whose `code` names the cause
+(`page_load_timeout`, `selector_timeout`, `site_unreachable`, `action_failed`,
 `scrape_timeout`, `scrape_error`) and whose `body.data` can carry the `content` and
 `screenshot` of the page the browser was left on.
 
