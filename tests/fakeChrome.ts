@@ -6,6 +6,7 @@ export interface TargetState {
   url: string;
   title: string;
   sessionId: string;
+  context?: string;
 }
 
 export const LIFECYCLE: string[] = [
@@ -33,14 +34,30 @@ export class FakeChrome extends FakeCDPServer {
     super();
     this.respond("Target.setAutoAttach", () => {
       for (let i = 0; i < this.initialPages; i++) {
-        this.attachPage(this.newTargetId(), { waiting: false, url: this.startUrl });
+        this.attachPage(this.newTargetId(), {
+          waiting: false,
+          url: this.startUrl,
+        });
       }
       return {};
     });
     this.respond("Target.getTargets", () => ({ targetInfos: [] }));
+    this.respond("Target.createBrowserContext", () => ({
+      browserContextId: "C1",
+    }));
+    this.respond("Target.disposeBrowserContext", (params) => {
+      for (const target of [...this.targets.values()]) {
+        if (target.context === params.browserContextId) this.detach(target.sessionId);
+      }
+      return {};
+    });
     this.respond("Target.createTarget", (params) => {
       const targetId = this.newTargetId();
-      this.attachPage(targetId, { waiting: true, url: params.url ?? "about:blank" });
+      this.attachPage(targetId, {
+        waiting: true,
+        url: params.url ?? "about:blank",
+        context: params.browserContextId,
+      });
       return { targetId };
     });
     this.respond("Target.closeTarget", (params) => {
@@ -94,11 +111,23 @@ export class FakeChrome extends FakeCDPServer {
 
   attachPage(
     targetId: string,
-    options: { waiting?: boolean; url?: string; type?: string; title?: string } = {},
+    options: {
+      waiting?: boolean;
+      url?: string;
+      type?: string;
+      title?: string;
+      context?: string;
+    } = {},
   ): string {
     const sessionId = `S-${targetId}`;
     const url = options.url ?? "about:blank";
-    this.targets.set(targetId, { url, title: options.title ?? "", sessionId });
+    const context = options.context;
+    this.targets.set(targetId, {
+      url,
+      title: options.title ?? "",
+      sessionId,
+      context,
+    });
     this.sessions.set(sessionId, targetId);
     this.event("Target.attachedToTarget", {
       sessionId,
@@ -107,6 +136,7 @@ export class FakeChrome extends FakeCDPServer {
         type: options.type ?? "page",
         url,
         title: options.title ?? "",
+        browserContextId: context,
       },
       waitingForDebugger: options.waiting ?? true,
     });

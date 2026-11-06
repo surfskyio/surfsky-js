@@ -84,9 +84,16 @@ export interface BrowserOptions {
   createWebSocket?: CreateWebSocket;
   logger?: Partial<Logger> | null;
   onClose?: () => Promise<void> | void;
+  newContext?: boolean;
 }
 
-/** A connected cloud browser, and the page its session started with. */
+/**
+ * A connected cloud browser, and the page its session started with.
+ *
+ * With `newContext: true` it opens a browser context of its own and works only in
+ * that context's pages, so several browsers can share one Chrome; `close()`
+ * disposes the context.
+ */
 export class Browser extends Page implements AsyncDisposable {
   readonly session: Session;
   readonly data: Record<string, unknown> = {};
@@ -95,6 +102,8 @@ export class Browser extends Page implements AsyncDisposable {
   readonly connectTimeout: number;
   readonly commandTimeout: number | null;
   readonly logger: Logger;
+  readonly newContext: boolean;
+  browserContextId: string | null = null;
   /** @internal */ _pages: Map<string, Page> = new Map();
   /** @internal aborts on close: background sleeps end early */
   _signal: AbortSignal;
@@ -107,6 +116,7 @@ export class Browser extends Page implements AsyncDisposable {
   #closing: Promise<void> | undefined;
   #retired = false;
   #useCount = 0;
+  #context: Record<string, string> = {};
 
   constructor(session: Session, options: BrowserOptions = {}) {
     super(undefined, "", "");
@@ -117,6 +127,7 @@ export class Browser extends Page implements AsyncDisposable {
     this.commandTimeout =
       options.commandTimeout === undefined ? 60_000 : options.commandTimeout;
     this.logger = makeLogger(options.logger);
+    this.newContext = options.newContext ?? false;
     this.#createWebSocket = options.createWebSocket;
     this.#onClose = options.onClose;
     this._signal = this.#abort.signal;
@@ -179,6 +190,7 @@ export class Browser extends Page implements AsyncDisposable {
       this.cdp.send("Target.createTarget", {
         url: "about:blank",
         newWindow: true,
+        ...this.#context,
       }),
     );
     return this._pageReady(created.targetId, deadline);
@@ -254,11 +266,19 @@ export class Browser extends Page implements AsyncDisposable {
         "Page.javascriptDialogOpening",
         this.#toPage((page, event) => page._onDialog(event)),
       );
+      if (this.newContext) {
+        const created = await deadline.race(client.send("Target.createBrowserContext"));
+        this.browserContextId = created.browserContextId;
+        this.#context = { browserContextId: created.browserContextId };
+      }
       await deadline.race(client.send("Target.setAutoAttach", AUTO_ATTACH));
       await deadline.race(client.send("Target.getTargets"));
       if (!this._sessionId) {
         const created = await deadline.race(
-          client.send("Target.createTarget", { url: "about:blank" }),
+          client.send("Target.createTarget", {
+            url: "about:blank",
+            ...this.#context,
+          }),
         );
         await this._pageReady(created.targetId, deadline);
       }
@@ -285,6 +305,14 @@ export class Browser extends Page implements AsyncDisposable {
       5_000,
       () => new BrowserTimeoutError("close timed out"),
     ).catch((err) => this.logger.debug(`close: ${String(err)}`));
+    if (client !== undefined && this.browserContextId !== null) {
+      const params = { browserContextId: this.browserContextId };
+      await withTimeout(
+        client.send("Target.disposeBrowserContext", params),
+        5_000,
+        () => new BrowserTimeoutError("the browser context was not disposed"),
+      ).catch((err) => this.logger.debug(`close: ${String(err)}`));
+    }
     if (client !== undefined) await client.stop();
     this._closed = true;
     await this.#onClose?.();
@@ -335,8 +363,11 @@ export class Browser extends Page implements AsyncDisposable {
     const waiting = Boolean(event.waitingForDebugger);
     const url: string = info.url ?? "";
     const adoptable = isStartPage(url) && !this._sessionId;
+    const otherContext =
+      this.browserContextId !== null && info.browserContextId !== this.browserContextId;
     if (
       info.type !== "page" ||
+      otherContext ||
       (NON_WEB_SCHEMES.some((scheme) => url.startsWith(scheme)) && !adoptable)
     ) {
       this._spawn(this.#letGo(sessionId, waiting));
@@ -390,7 +421,7 @@ export class Browser extends Page implements AsyncDisposable {
     page._closed = true;
     this._notify();
     page._waiter?.fail("page closed");
-    if (page === this) {
+    if (page === this && this.connected) {
       this.logger.warn(`page target gone for ${this.internalUuid}`);
       this.retire();
     }

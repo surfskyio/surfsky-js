@@ -106,6 +106,55 @@ describe("connect", () => {
     expect(browser.targetId).toBe("T2");
   });
 
+  test("a browser in a new context leaves the pages of other contexts alone", async () => {
+    const chrome = new FakeChrome();
+    chrome.startUrl = "https://busy.test/";
+    const { browser } = await start({ chrome, newContext: true });
+    await settle();
+    expect(browser.browserContextId).toBe("C1");
+    expect(chrome.called("Target.createTarget")[0]?.params).toEqual({
+      url: "about:blank",
+      browserContextId: "C1",
+    });
+    expect(browser.targetId).toBe("T2");
+    expect(browser.pages).toEqual([browser]);
+    expect(chrome.onSession("S-T1")).toEqual([]);
+    expect(chrome.called("Target.detachFromTarget")[0]?.params.sessionId).toBe("S-T1");
+  });
+
+  test("a browser in a new context takes only the pages that open in it", async () => {
+    const chrome = new FakeChrome();
+    chrome.initialPages = 0;
+    const { browser } = await start({ chrome, newContext: true });
+    chrome.attachPage("B", { url: "", context: "C0" });
+    chrome.attachPage("P", { url: "", context: "C1" });
+    const page = await browser.newPage();
+    await settle();
+    expect(browser.pages.map((p) => p.targetId)).toEqual(["T1", "P", page.targetId]);
+    expect(chrome.called("Target.createTarget")[1]?.params).toEqual({
+      url: "about:blank",
+      newWindow: true,
+      browserContextId: "C1",
+    });
+    expect(chrome.onSession("S-B")).toEqual(["Runtime.runIfWaitingForDebugger"]);
+    expect(
+      chrome.called("Target.detachFromTarget").map((c) => c.params.sessionId),
+    ).toEqual(["S-B"]);
+  });
+
+  test("closing a browser in a new context disposes the context", async () => {
+    const warn = vi.fn();
+    const { browser, chrome } = await start({
+      newContext: true,
+      logger: { warn },
+    });
+    await browser.close();
+    expect(chrome.called("Target.disposeBrowserContext")[0]?.params).toEqual({
+      browserContextId: "C1",
+    });
+    expect(warn).not.toHaveBeenCalled();
+  });
+
   test("a refused socket", async () => {
     const createWebSocket = (url: string) => {
       const ws = new FakeWebSocket(url);
