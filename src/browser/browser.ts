@@ -296,23 +296,26 @@ export class Browser extends Page implements AsyncDisposable {
 
   async #close(): Promise<void> {
     this.#abort.abort();
+    const settle = (tasks: Promise<void>[]) =>
+      withTimeout(
+        Promise.allSettled(tasks),
+        5_000,
+        () => new BrowserTimeoutError("close timed out"),
+      ).catch((err) => this.logger.debug(`close: ${String(err)}`));
     const pending = [...this.#pending];
     this.#pending.clear();
-    const client = this.#client;
-    this.#client = undefined;
-    await withTimeout(
-      Promise.allSettled(pending),
-      5_000,
-      () => new BrowserTimeoutError("close timed out"),
-    ).catch((err) => this.logger.debug(`close: ${String(err)}`));
-    if (client !== undefined && this.browserContextId !== null) {
+    await settle(pending);
+    if (this.#client !== undefined && this.browserContextId !== null) {
       const params = { browserContextId: this.browserContextId };
       await withTimeout(
-        client.send("Target.disposeBrowserContext", params),
+        this.#client.send("Target.disposeBrowserContext", params),
         5_000,
         () => new BrowserTimeoutError("the browser context was not disposed"),
       ).catch((err) => this.logger.debug(`close: ${String(err)}`));
+      await settle([...this.#pending]);
     }
+    const client = this.#client;
+    this.#client = undefined;
     if (client !== undefined) await client.stop();
     this._closed = true;
     await this.#onClose?.();
@@ -370,7 +373,7 @@ export class Browser extends Page implements AsyncDisposable {
       otherContext ||
       (NON_WEB_SCHEMES.some((scheme) => url.startsWith(scheme)) && !adoptable)
     ) {
-      this._spawn(this.#letGo(sessionId, waiting));
+      this._spawn(this.#detach(sessionId, waiting));
       return;
     }
     let page: Page;
@@ -395,7 +398,7 @@ export class Browser extends Page implements AsyncDisposable {
     this._changed = Promise.withResolvers<void>();
   }
 
-  async #letGo(sessionId: string, waiting: boolean): Promise<void> {
+  async #detach(sessionId: string, waiting: boolean): Promise<void> {
     const timeout = this.commandTimeout;
     const detach = async () => {
       if (waiting)
@@ -405,7 +408,7 @@ export class Browser extends Page implements AsyncDisposable {
     await withTimeout(
       detach(),
       timeout,
-      () => new BrowserTimeoutError(`the target did not let go within ${timeout}ms`),
+      () => new BrowserTimeoutError(`the target did not detach within ${timeout}ms`),
     );
   }
 
@@ -417,14 +420,14 @@ export class Browser extends Page implements AsyncDisposable {
 
   /** @internal */
   _drop(page: Page): void {
+    if (page === this && this.#closing === undefined) {
+      this.logger.warn(`page target gone for ${this.internalUuid}`);
+      this.retire();
+    }
     this._pages.delete(page._sessionId);
     page._closed = true;
     this._notify();
     page._waiter?.fail("page closed");
-    if (page === this && this.connected) {
-      this.logger.warn(`page target gone for ${this.internalUuid}`);
-      this.retire();
-    }
   }
 
   #toPage(handler: (page: Page, event: Record<string, any>) => void): EventHandler {

@@ -57,7 +57,7 @@ describe("connect", () => {
     ]);
   });
 
-  test("non-web targets are resumed and let go", async () => {
+  test("non-web targets are resumed and detached", async () => {
     const { browser, chrome } = await start();
     chrome.attachPage("EXT", {
       url: "chrome-extension://abc/bg.html",
@@ -97,7 +97,7 @@ describe("connect", () => {
     expect(chrome.called("Target.detachFromTarget")[0]?.params.sessionId).toBe("S-T2");
   });
 
-  test("another chrome:// page is let go and a blank one opened", async () => {
+  test("another chrome:// page is detached and a blank one opened", async () => {
     const chrome = new FakeChrome();
     chrome.startUrl = "chrome://settings/";
     const { browser } = await start({ chrome });
@@ -140,6 +140,15 @@ describe("connect", () => {
     expect(
       chrome.called("Target.detachFromTarget").map((c) => c.params.sessionId),
     ).toEqual(["S-B"]);
+  });
+
+  test("a page another client opens while the context is disposed is resumed", async () => {
+    const chrome = new FakeChrome();
+    chrome.initialPages = 0;
+    chrome.duringDispose = [{ targetId: "B", url: "", context: "C0" }];
+    const { browser } = await start({ chrome, newContext: true });
+    await browser.close();
+    expect(chrome.onSession("S-B")).toContain("Runtime.runIfWaitingForDebugger");
   });
 
   test("closing a browser in a new context disposes the context", async () => {

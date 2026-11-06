@@ -27,6 +27,7 @@ export class FakeChrome extends FakeCDPServer {
   initialPages = 1;
   /** What the session's startup tab is showing. */
   startUrl = "about:blank";
+  duringDispose: { targetId: string; url: string; context: string }[] = [];
   #targetCounter = 0;
   #loaderCounter = 0;
 
@@ -46,6 +47,9 @@ export class FakeChrome extends FakeCDPServer {
       browserContextId: "C1",
     }));
     this.respond("Target.disposeBrowserContext", (params) => {
+      for (const { targetId, ...page } of this.duringDispose) {
+        this.attachPage(targetId, { ...page, waiting: true });
+      }
       for (const target of [...this.targets.values()]) {
         if (target.context === params.browserContextId) this.detach(target.sessionId);
       }
