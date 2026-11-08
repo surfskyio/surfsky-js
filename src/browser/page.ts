@@ -946,8 +946,15 @@ export class Page extends Actions {
       params.clip = await this.#clip(options.selector);
     } else if (fullPage) {
       const metrics = await this.send("Page.getLayoutMetrics");
+      const viewport = metrics.cssLayoutViewport ?? metrics.layoutViewport;
       const size = metrics.cssContentSize ?? metrics.contentSize;
-      params.clip = { x: 0, y: 0, scale: 1, ...size };
+      params.clip = {
+        x: 0,
+        y: 0,
+        width: viewport.clientWidth,
+        height: size.height,
+        scale: 1,
+      };
     }
     const shot = await this.send("Page.captureScreenshot", params);
     return fromBase64(shot.data);

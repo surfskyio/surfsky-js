@@ -740,7 +740,8 @@ describe("screenshot", () => {
       model: { content: [10, 20, 110, 20, 110, 70, 10, 70] },
     }));
     chrome.respond("Page.getLayoutMetrics", () => ({
-      cssContentSize: { width: 800, height: 3000 },
+      cssContentSize: { width: 16001252, height: 3000 },
+      cssLayoutViewport: { clientWidth: 1425 },
       cssVisualViewport: { pageX: 5, pageY: 100 },
     }));
     expect([...(await browser.screenshot())]).toEqual([137, 80, 78, 71]);
@@ -760,7 +761,7 @@ describe("screenshot", () => {
       {
         format: "webp",
         captureBeyondViewport: true,
-        clip: { x: 0, y: 0, scale: 1, width: 800, height: 3000 },
+        clip: { x: 0, y: 0, width: 1425, height: 3000, scale: 1 },
       },
     ]);
     expect(chrome.called("DOM.scrollIntoViewIfNeeded")[0]?.params).toEqual({

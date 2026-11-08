@@ -133,7 +133,7 @@ if (box) await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
 | `isVisible(selector)` | First match has a bounding box. |
 | `boundingBox(selector)` | `{x, y, width, height}` of the content box in page-viewport CSS pixels. `null` when nothing matches or it has no box. |
 | `waitForSelector(selector, { visible: true, timeout })` | Wait for the element, visible by default. |
-| `screenshot({ selector, fullPage, format: "png", quality })` | `Uint8Array`. Viewport, one element or the full page. `format`: `png`, `jpeg`, `webp`. |
+| `screenshot({ selector, fullPage, format: "png", quality })` | `Uint8Array`. Viewport, one element or the full page, its whole height at the window's width. `format`: `png`, `jpeg`, `webp`. |
 
 ## Input
 
