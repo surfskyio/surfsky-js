@@ -634,7 +634,7 @@ describe("reading", () => {
     const { browser, chrome } = await start();
     let present = false;
     let boxed = false;
-    chrome.respond("DOM.querySelector", () => ({ nodeId: present ? 3 : 0 }));
+    chrome.respond("DOM.querySelectorAll", () => ({ nodeIds: present ? [3] : [] }));
     chrome.respond("DOM.getBoxModel", () =>
       boxed ? { model: { width: 10, height: 5 } } : { error: { message: "no box" } },
     );
@@ -654,6 +654,27 @@ describe("reading", () => {
       model: { width: 0, height: 5 },
     }));
     expect(await browser.isVisible("#a")).toBe(false);
+  });
+
+  test.each([
+    ["css", "li", [10, 20, 30]],
+    ["xpath", "//li", []],
+    ["shadow root", "li", []],
+  ])("waitForSelector passes on any visible match: %s", async (_, selector, lightDom) => {
+    const { browser, chrome } = await start();
+    chrome.respond("DOM.querySelectorAll", () => ({ nodeIds: lightDom }));
+    chrome.respond("DOM.performSearch", () => ({ searchId: "s", resultCount: 3 }));
+    chrome.respond("DOM.getSearchResults", () => ({ nodeIds: [10, 20, 30] }));
+    chrome.respond("DOM.resolveNode", () => ({ object: { objectId: "O" } }));
+    chrome.respond("Runtime.callFunctionOn", () => ({ result: { value: true } }));
+    // only the last match is rendered
+    chrome.respond("DOM.getBoxModel", (p) =>
+      p.nodeId === 30
+        ? { model: { width: 10, height: 5 } }
+        : { error: { message: "Could not compute box model." } },
+    );
+    await browser.waitForSelector(selector, { timeout: 500 });
+    expect(await browser.isVisible(selector)).toBe(true);
   });
 
   test("waitForUrl", async () => {

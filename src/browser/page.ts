@@ -750,16 +750,7 @@ export class Page extends Actions {
   }
 
   async count(selector: string): Promise<number> {
-    const document = await this.send("DOM.getDocument", { depth: 0 });
-    const xpath = asXPath(selector);
-    if (xpath !== undefined) return (await this.#search(selector)).length;
-    const found = await this.send("DOM.querySelectorAll", {
-      nodeId: document.root.nodeId,
-      selector,
-    });
-    const nodeIds = (found.nodeIds as unknown[] | undefined) ?? [];
-    if (nodeIds.length > 0) return nodeIds.length;
-    return (await this.#search(selector)).length;
+    return (await this.#nodeIds(selector)).length;
   }
 
   async boundingBox(
@@ -817,18 +808,36 @@ export class Page extends Actions {
   async #matches(selector: string, visible: boolean): Promise<boolean> {
     // Node ids belong to one document, so a navigation between the lookups
     // invalidates them. The poll is here for that, and for a node without a box yet.
-    let box: Record<string, any>;
+    let nodeIds: number[];
     try {
-      const nodeId = await this.#nodeId(selector);
-      if (nodeId === undefined) return false;
-      if (!visible) return true;
-      box = await this.send("DOM.getBoxModel", { nodeId });
+      nodeIds = await this.#nodeIds(selector);
     } catch (err) {
       if (err instanceof CDPError) return false;
       throw err;
     }
-    const model = box.model ?? {};
-    return Boolean(model.width) && Boolean(model.height);
+    if (!visible) return nodeIds.length > 0;
+    for (const nodeId of nodeIds) {
+      try {
+        const box = await this.send("DOM.getBoxModel", { nodeId });
+        if (box.model?.width && box.model?.height) return true;
+      } catch (err) {
+        // an element that is not rendered has no box model
+        if (!(err instanceof CDPError)) throw err;
+      }
+    }
+    return false;
+  }
+
+  async #nodeIds(selector: string): Promise<number[]> {
+    const document = await this.send("DOM.getDocument", { depth: 0 });
+    if (asXPath(selector) !== undefined) return this.#search(selector);
+    const found = await this.send("DOM.querySelectorAll", {
+      nodeId: document.root.nodeId,
+      selector,
+    });
+    const nodeIds = (found.nodeIds as number[] | undefined) ?? [];
+    // nothing in the light DOM: the same selector inside every shadow root
+    return nodeIds.length > 0 ? nodeIds : this.#search(selector);
   }
 
   async #nodeId(selector: string): Promise<number | undefined> {
