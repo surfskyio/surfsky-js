@@ -271,6 +271,7 @@ describe("pages", () => {
     const page = await browser.newPage();
     chrome.event("Inspector.targetCrashed", {}, page._sessionId);
     expect(page.closed).toBe(true);
+    await expect(page.send("Page.reload")).rejects.toThrow("the page crashed");
     expect(browser.pages).toEqual([browser]);
     expect(browser.shouldRecycle).toBe(false);
     chrome.detach(sessionId);

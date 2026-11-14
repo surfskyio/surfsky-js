@@ -244,7 +244,10 @@ export class Browser extends Page implements AsyncDisposable {
       client.on("Target.detachedFromTarget", (event) => this._onDetached(event));
       client.on(
         "Inspector.targetCrashed",
-        this.#toPage((page) => this._drop(page)),
+        this.#toPage((page) => {
+          page._crashed = true;
+          this._drop(page);
+        }),
       );
       client.on(
         "Page.lifecycleEvent",

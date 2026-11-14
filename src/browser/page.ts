@@ -238,6 +238,7 @@ export class Page extends Actions {
   /** @internal */ _sessionId!: string;
   /** @internal */ _frameId!: string;
   /** @internal */ _closed!: boolean;
+  /** @internal */ _crashed = false;
   /** Answers this page's dialogs; the browser's handler when unset. */
   onDialog: DialogHandler | null = null;
   /** @internal the main frame's newest document */
@@ -306,7 +307,8 @@ export class Page extends Actions {
 
   /** @internal */
   _requireOpen(): void {
-    if (this._closed) throw new PageClosedError("page is closed");
+    if (this._closed)
+      throw new PageClosedError(this._crashed ? "the page crashed" : "page is closed");
   }
 
   /** @internal */
