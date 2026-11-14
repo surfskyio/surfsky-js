@@ -101,6 +101,7 @@ waits for one of its own and throws `RateLimitError` only if it has none.
 | `waitForLoadState(state = "load", { timeout })` | Wait for the current document to reach `state`. |
 | `waitForUrl(fragment, { timeout })` | Wait until the URL contains `fragment`. Returns the URL. |
 | `status` | HTTP status of the current document. Set even when `goto` throws. |
+| `passChallenge({ timeout, solve: true })` | Get the current page past a challenge page. Returns `{ status, antibot, reason, costUsd }`; `status`: `none`, `passed`, `solved`, `not_solved`, `blocked`. Solves nothing on a page that is not a challenge page; `solve: false` only waits. `timeout` is ms, 45s by default. |
 
 ## Reading
 

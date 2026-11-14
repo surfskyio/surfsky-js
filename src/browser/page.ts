@@ -1,8 +1,8 @@
 import { BrowserTimeoutError, CDPError, PageClosedError } from "../errors.js";
-import type { Cookie, WaitUntil } from "../types.js";
+import type { Cookie, Loose, WaitUntil } from "../types.js";
 import { isRecord } from "../types.js";
 import { dropNulls, Flag, fromBase64, sleep, withTimeout } from "../util.js";
-import { Actions } from "./actions.js";
+import { Actions, cdpParams } from "./actions.js";
 import type { Browser } from "./browser.js";
 import type { CDPClient } from "./cdp.js";
 
@@ -81,6 +81,20 @@ export interface EvaluateOptions {
   isolated?: boolean;
   awaitPromise?: boolean;
 }
+
+export interface PassChallengeOptions {
+  timeout?: number;
+  solve?: boolean;
+}
+
+export interface ChallengeResult {
+  status: Loose<"none" | "passed" | "solved" | "not_solved" | "blocked">;
+  antibot: string | null;
+  reason: string | null;
+  costUsd: number | null;
+}
+
+const CHALLENGE_TIMEOUT = 45_000;
 
 export interface ScreenshotOptions {
   selector?: string;
@@ -296,8 +310,11 @@ export class Page extends Actions {
   }
 
   /** @internal */
-  async _send(method: string, params?: Record<string, unknown>): Promise<any> {
-    const timeout = this._browser.commandTimeout;
+  async _send(
+    method: string,
+    params?: Record<string, unknown>,
+    timeout: number | null = this._browser.commandTimeout,
+  ): Promise<any> {
     try {
       return await withTimeout(
         this.cdp.send(method, params, this._sessionId),
@@ -940,6 +957,27 @@ export class Page extends Actions {
     return ((result.cookies as Record<string, unknown>[] | undefined) ?? []).map(
       fromCdpCookie,
     );
+  }
+
+  async passChallenge(options: PassChallengeOptions = {}): Promise<ChallengeResult> {
+    this._requireOpen();
+    await this._waitReady();
+    const { commandTimeout } = this._browser;
+    const limit =
+      commandTimeout === null
+        ? null
+        : Math.max(commandTimeout, (options.timeout ?? CHALLENGE_TIMEOUT) + 5_000);
+    const reply = await this._send(
+      "Captcha.solve",
+      cdpParams({ challengeOnly: true, ...options }),
+      limit,
+    );
+    return {
+      status: reply.challenge,
+      antibot: reply.antibot ?? null,
+      reason: reply.reason ?? null,
+      costUsd: reply.usage?.cost_usd ?? null,
+    };
   }
 
   async screenshot(options: ScreenshotOptions = {}): Promise<Uint8Array> {

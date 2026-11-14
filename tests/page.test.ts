@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, test, vi } from "vitest";
 import { CapturedResponse, cookieParam, NavWaiter } from "../src/browser/page.js";
 import { BrowserTimeoutError, CDPError, PageClosedError } from "../src/errors.js";
+import { sleep } from "../src/util.js";
 import type { FakeBrowser } from "./fakeChrome.js";
 import { FakeChrome, fakeBrowser } from "./fakeChrome.js";
 import { settle } from "./helpers.js";
@@ -965,6 +966,71 @@ describe("errors", () => {
     await expect(browser.bringToFront()).rejects.toThrow(
       "Page.bringToFront did not answer within 100ms",
     );
+  });
+});
+
+describe("passChallenge", () => {
+  test("sends Captcha.solve with challengeOnly and maps each reply", async () => {
+    const { browser, chrome } = await start();
+    chrome.respond("Captcha.solve", () => ({
+      status: "success",
+      type: "turnstile",
+      usage: { cost_usd: 0.0021 },
+      challenge: "solved",
+      antibot: "cloudflare",
+      reason: null,
+    }));
+    expect(await browser.passChallenge()).toEqual({
+      status: "solved",
+      antibot: "cloudflare",
+      reason: null,
+      costUsd: 0.0021,
+    });
+    expect(chrome.calls.at(-1)?.params).toEqual({ challengeOnly: true });
+
+    chrome.respond("Captcha.solve", () => ({
+      challenge: "not_solved",
+      antibot: "datadome",
+      reason: "no_solver",
+    }));
+    expect(await browser.passChallenge({ timeout: 20_000, solve: false })).toEqual({
+      status: "not_solved",
+      antibot: "datadome",
+      reason: "no_solver",
+      costUsd: null,
+    });
+    expect(chrome.calls.at(-1)?.params).toEqual({
+      challengeOnly: true,
+      timeout: 20_000,
+      solve: false,
+    });
+
+    for (const challenge of ["none", "passed", "blocked"]) {
+      chrome.respond("Captcha.solve", () => ({ challenge, antibot: null, reason: null }));
+      expect(await browser.passChallenge()).toEqual({
+        status: challenge,
+        antibot: null,
+        reason: null,
+        costUsd: null,
+      });
+    }
+  });
+
+  test.each([
+    ["a timeout above commandTimeout still gets its reply", { timeout: 200 }],
+    ["without a timeout it still outlasts a short commandTimeout", {}],
+  ])("%s", async (_name, options) => {
+    const { browser, chrome } = await start({ commandTimeout: 20 });
+    chrome.hangs.add("Captcha.solve");
+    const result = browser.passChallenge(options);
+    await sleep(60);
+    const call = chrome.calls.at(-1)!;
+    chrome.socket?.message({
+      id: call.id,
+      sessionId: call.sessionId,
+      result: { challenge: "passed" },
+    });
+    expect((await result).status).toBe("passed");
   });
 });
 

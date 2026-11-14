@@ -61,6 +61,10 @@ with `browser_settings: { inactive_kill_timeout: 600 }` (seconds, up to 3600).
 `client.profiles.listActive()` shows what is still running and
 `client.profiles.stopAll()` stops it.
 
+`await browser.passChallenge()` after a navigation gets the page past a challenge
+page and returns `{ status, antibot, reason, costUsd }`; on any other page it
+solves nothing and `status` is `none`.
+
 Clicks and typing go through Surfsky's [human emulation](https://docs.surfsky.io/human_emulation).
 SDK timeouts are in milliseconds.
 

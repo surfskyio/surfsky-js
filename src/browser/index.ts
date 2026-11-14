@@ -21,10 +21,12 @@ export {
 } from "./cdp.js";
 export {
   CapturedResponse,
+  type ChallengeResult,
   type DialogHandler,
   type EvaluateOptions,
   type GotoOptions,
   Page,
+  type PassChallengeOptions,
   type ScreenshotOptions,
   type WaitOptions,
 } from "./page.js";
