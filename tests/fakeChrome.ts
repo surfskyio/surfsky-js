@@ -28,6 +28,8 @@ export class FakeChrome extends FakeCDPServer {
   /** What the session's startup tab is showing. */
   startUrl = "about:blank";
   duringDispose: { targetId: string; url: string; context: string }[] = [];
+  /** target -> its document's response status; about:blank reads 0 */
+  readonly statuses: Map<string, number> = new Map();
   #targetCounter = 0;
   #loaderCounter = 0;
 
@@ -99,6 +101,10 @@ export class FakeChrome extends FakeCDPServer {
       return {};
     });
     this.respond("Page.createIsolatedWorld", () => ({ executionContextId: 7 }));
+    this.respond("Runtime.evaluate", (_params, sessionId) => {
+      const targetId = this.sessions.get(sessionId ?? "") ?? "";
+      return { result: { type: "number", value: this.statuses.get(targetId) ?? 0 } };
+    });
     this.respond("DOM.getDocument", () => ({ root: { nodeId: 1 } }));
     this.respond("DOM.resolveNode", () => ({ object: { objectId: "O7" } }));
   }
@@ -168,24 +174,6 @@ export class FakeChrome extends FakeCDPServer {
         sessionId,
       );
     }
-  }
-
-  documentResponse(
-    sessionId: string,
-    requestId: string,
-    status: number,
-    frameId?: string,
-  ): void {
-    this.event(
-      "Network.responseReceived",
-      {
-        requestId,
-        type: "Document",
-        frameId: frameId ?? this.sessions.get(sessionId),
-        response: { url: "https://x.test/", status },
-      },
-      sessionId,
-    );
   }
 
   dialog(sessionId: string, type: string, message = ""): void {

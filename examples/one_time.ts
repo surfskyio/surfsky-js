@@ -12,6 +12,6 @@ import { Surfsky } from "surfsky";
 await using client = new Surfsky();
 await using browser = await client.browser();
 await browser.goto("https://example.com", { waitUntil: "domcontentloaded" });
-console.log("status :", browser.status);
+console.log("status :", await browser.status());
 console.log("title  :", await browser.title());
 console.log(await browser.content());

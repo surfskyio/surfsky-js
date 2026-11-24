@@ -16,8 +16,9 @@ const RETIRE_ERRORS = /blocked|captcha/i;
 
 async function scrape(browser: Browser, url: string): Promise<string> {
   await browser.goto(url, { waitUntil: "domcontentloaded" });
-  if (browser.status !== undefined && browser.status >= 500) {
-    throw new Error(`HTTP ${browser.status}`); // the site is down, not our browser
+  const status = await browser.status();
+  if (status !== undefined && status >= 500) {
+    throw new Error(`HTTP ${status}`);
   }
   return browser.title();
 }

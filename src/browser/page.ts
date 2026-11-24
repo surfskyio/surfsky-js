@@ -26,15 +26,18 @@ function asXPath(s: string): string | undefined {
   return /^\s*(xpath=|\/\/|\.\.)/.test(s) ? s.trim().replace(/^xpath=/, "") : undefined;
 }
 
-const SELECT = `function (value, label) {
-  const option = Array.from(this.options).find(
-    o => label === null ? o.value === value : o.label === label || o.text === label
-  );
-  if (!option) return false;
-  this.value = option.value;
-  this.dispatchEvent(new Event("input", {bubbles: true}));
-  this.dispatchEvent(new Event("change", {bubbles: true}));
-  return option.value;
+const SELECT_STATE = `function () {
+  const box = e => {
+    const r = e.getBoundingClientRect();
+    return {x: r.x, y: r.y, width: r.width, height: r.height};
+  };
+  const listbox = this.multiple || this.size > 1;
+  const options = Array.from(this.options, o => ({
+    value: o.value, label: o.label, text: o.text, selected: o.selected,
+    disabled: o.matches(":disabled"), hidden: getComputedStyle(o).display === "none",
+    box: listbox ? box(o) : null,
+  }));
+  return {listbox, box: box(this), viewport: innerHeight, options};
 }`;
 
 const INNER_TEXT = "function () { return this.innerText }";
@@ -43,6 +46,8 @@ const IS_FOCUSED = "function () { return this.getRootNode().activeElement === th
 
 const MATCHES =
   "function (s) { return this.nodeType === 1 && (s == null || this.matches(s)) }";
+
+const RESPONSE_STATUS = 'performance.getEntriesByType("navigation")[0]?.responseStatus';
 
 // what Chrome answers once the isolated world is gone
 const WORLD_GONE = ["Cannot find context", "does not belong to the document"];
@@ -251,7 +256,6 @@ export class Page extends Actions {
   _ready!: Flag;
   /** @internal */ _setupError: unknown;
   /** @internal */ _waiter: NavWaiter | undefined;
-  /** @internal */ _status: number | undefined;
   /** @internal */ _storageReady!: boolean;
   /** @internal */ _captures!: string[];
   /** @internal */ _responses!: CapturedResponse[];
@@ -276,7 +280,6 @@ export class Page extends Actions {
     this._ready.set();
     this._setupError = undefined;
     this._waiter = undefined;
-    this._status = undefined;
     this._storageReady = false;
     this._captures = [];
     this._responses = [];
@@ -293,10 +296,6 @@ export class Page extends Actions {
 
   get closed(): boolean {
     return this._closed;
-  }
-
-  get status(): number | undefined {
-    return this._status;
   }
 
   override async send(method: string, params?: Record<string, unknown>): Promise<any> {
@@ -345,7 +344,6 @@ export class Page extends Actions {
     const commands: [string, Record<string, unknown> | undefined][] = [
       ["Page.enable", undefined],
       ["Page.setLifecycleEventsEnabled", { enabled: true }],
-      ["Network.enable", undefined],
     ];
     if (patterns.length > 0) commands.push(["Fetch.enable", { patterns }]);
     if (waiting) commands.push(["Runtime.runIfWaitingForDebugger", undefined]);
@@ -416,7 +414,6 @@ export class Page extends Actions {
     if (this._waiter !== undefined) throw new Error("navigation already in progress");
     const waiter = new NavWaiter(LIFECYCLE_EVENT[waitUntil]);
     this._waiter = waiter;
-    this._status = undefined;
     const deadline = new Deadline(
       options.timeout ?? 30_000,
       `navigation to ${url} did not reach '${waitUntil}'`,
@@ -439,7 +436,6 @@ export class Page extends Actions {
     if (this._waiter !== undefined) throw new Error("navigation already in progress");
     const waiter = new NavWaiter(LIFECYCLE_EVENT[waitUntil]);
     this._waiter = waiter;
-    this._status = undefined;
     const deadline = new Deadline(
       options.timeout ?? 30_000,
       `reload did not reach '${waitUntil}'`,
@@ -486,13 +482,17 @@ export class Page extends Actions {
     if (fragments.length === 0)
       throw new TypeError("captureResponses needs at least one URL fragment");
     this._requireOpen();
+    const enable = this._captures.length === 0;
     this._captures.push(...fragments);
+    if (enable) await this.send("Network.enable");
   }
 
   async stopCapturing(): Promise<void> {
+    const capturing = this._captures.length > 0;
     this._captures = [];
     this._responses = [];
     this._inFlight.clear();
+    if (capturing && !this._closed) await this.send("Network.disable");
   }
 
   async waitForResponse(
@@ -519,9 +519,6 @@ export class Page extends Actions {
     const response: Record<string, unknown> = isRecord(event.response)
       ? event.response
       : {};
-    if (event.type === "Document" && event.frameId === this._frameId) {
-      this._status = typeof response.status === "number" ? response.status : undefined;
-    }
     const url = typeof response.url === "string" ? response.url : "";
     if (this._captures.some((fragment) => url.includes(fragment))) {
       this._inFlight.set(String(event.requestId), response);
@@ -803,10 +800,85 @@ export class Page extends Actions {
     }
     const nodeId = await this.#nodeId(selector);
     if (nodeId === undefined) throw new Error(`nothing matches '${selector}'`);
-    const picked = await this.#call(nodeId, SELECT, value ?? null, label ?? null);
-    if (picked === false)
-      throw new Error(`'${selector}' has no option '${label ?? value}'`);
-    return picked as string;
+    const wanted = label ?? value;
+    let state = await this.#call(nodeId, SELECT_STATE);
+    const options: any[] = state.options;
+    const index = options.findIndex((o) =>
+      label === undefined ? o.value === value : o.label === label || o.text === label,
+    );
+    if (index === -1) throw new Error(`'${selector}' has no option '${wanted}'`);
+    const chosen = options[index];
+    if (chosen.disabled || chosen.hidden) {
+      throw new Error(`'${selector}' option '${wanted}' is disabled or hidden`);
+    }
+    const isChosen = (read: any): boolean => {
+      const values = read.options.filter((o: any) => o.selected).map((o: any) => o.value);
+      return values.length === 1 && values[0] === chosen.value;
+    };
+    if (isChosen(state)) return chosen.value;
+    const loaderId = this._loaderId;
+    for (let i = 0; i < 3; i++) {
+      const { box, viewport } = state;
+      const row = state.options[index].box;
+      const top = box.y;
+      const bottom = box.y + box.height;
+      const middle = (top + bottom) / 2;
+      if (top < 0 || bottom > viewport) {
+        await this.scroll({ deltaY: middle - viewport / 2 });
+      } else if (row && (row.y < top || row.y + row.height > bottom)) {
+        await this.mouse.move(box.x + box.width / 2, middle);
+        await this.scroll({ deltaY: row.y + row.height / 2 - middle });
+      } else {
+        break;
+      }
+      state = await this.#call(nodeId, SELECT_STATE);
+    }
+    const box = state.options[index].box ?? state.box;
+    if (!box.width || !box.height) throw new Error(`'${selector}' is not visible`);
+    await this.mouse.click(
+      box.x + box.width * (0.3 + Math.random() * 0.4),
+      box.y + box.height * (0.3 + Math.random() * 0.4),
+    );
+    if (!state.listbox) {
+      if (!(await this.#call(nodeId, IS_FOCUSED))) {
+        throw new Error(`'${selector}' did not take focus`);
+      }
+      const at = options.findIndex((o) => o.selected);
+      const shown = options.flatMap((o, i) => (o.disabled || o.hidden ? [] : [i]));
+      const down = shown.filter((i) => at < i && i <= index).length;
+      const up = shown.filter((i) => index <= i && i < at).length;
+      const name: string = chosen.label.trimStart().toLowerCase();
+      const others: string[] = options
+        .filter((o) => !o.disabled)
+        .map((o) => o.label.trimStart().toLowerCase());
+      others.splice(others.indexOf(name), 1);
+      const chars = Array.from(name);
+      const prefix = chars
+        .map((_, n) => chars.slice(0, n + 1).join(""))
+        .find(
+          (head, n) =>
+            (n === 0 || new Set(head).size > 1) &&
+            !others.some((other) => other.startsWith(head)),
+        );
+      if (prefix && down + up > 3) {
+        for (const char of prefix) {
+          await this.keyboard.press(char === " " ? "Space" : char);
+        }
+      } else {
+        for (let i = 0; i < down + up; i++) {
+          await this.keyboard.press(down ? "ArrowDown" : "ArrowUp");
+        }
+      }
+      await this.keyboard.press("Enter");
+    }
+    try {
+      state = await this.#call(nodeId, SELECT_STATE);
+    } catch (err) {
+      if (!(err instanceof CDPError) || this._loaderId === loaderId) throw err;
+      return chosen.value;
+    }
+    if (!isChosen(state)) throw new Error(`'${selector}' did not select '${wanted}'`);
+    return chosen.value;
   }
 
   async waitForSelector(
@@ -825,8 +897,6 @@ export class Page extends Actions {
   }
 
   async #matches(selector: string, visible: boolean): Promise<boolean> {
-    // Node ids belong to one document, so a navigation between the lookups
-    // invalidates them. The poll is here for that, and for a node without a box yet.
     let nodeIds: number[];
     try {
       nodeIds = await this.#nodeIds(selector);
@@ -840,7 +910,6 @@ export class Page extends Actions {
         const box = await this.send("DOM.getBoxModel", { nodeId });
         if (box.model?.width && box.model?.height) return true;
       } catch (err) {
-        // an element that is not rendered has no box model
         if (!(err instanceof CDPError)) throw err;
       }
     }
@@ -855,7 +924,6 @@ export class Page extends Actions {
       selector,
     });
     const nodeIds = (found.nodeIds as number[] | undefined) ?? [];
-    // nothing in the light DOM: the same selector inside every shadow root
     return nodeIds.length > 0 ? nodeIds : this.#search(selector);
   }
 
@@ -945,6 +1013,11 @@ export class Page extends Actions {
       targetId: this._targetId,
     });
     return info.targetInfo.title;
+  }
+
+  async status(): Promise<number | undefined> {
+    // about:blank and other documents with no response read 0
+    return (await this.evaluate(RESPONSE_STATUS)) || undefined;
   }
 
   async url(): Promise<string> {

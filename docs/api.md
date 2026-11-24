@@ -100,7 +100,7 @@ waits for one of its own and throws `RateLimitError` only if it has none.
 | `goBack({ timeout })`, `goForward({ timeout })` | Returns the new URL, `null` at the end of history. |
 | `waitForLoadState(state = "load", { timeout })` | Wait for the current document to reach `state`. |
 | `waitForUrl(fragment, { timeout })` | Wait until the URL contains `fragment`. Returns the URL. |
-| `status` | HTTP status of the current document. Set even when `goto` throws. |
+| `status()` | HTTP status of the current document after redirects. `undefined` for `about:blank` or a failed `goto`. |
 | `passChallenge({ timeout, solve: true })` | Get the current page past a challenge page. Returns `{ status, antibot, reason, costUsd }`; `status`: `none`, `passed`, `solved`, `not_solved`, `blocked`. Solves nothing on a page that is not a challenge page; `solve: false` only waits. `timeout` is ms, 45s by default. |
 
 ## Reading
@@ -149,7 +149,7 @@ and `hover` also take `waitForVisible`, `scrollIntoView`, `preDelay`,
 | `hover(selector)` | Move the mouse over it. |
 | `type(selector, text)` | Click, then type after the existing text. Throws when the click did not focus the element. |
 | `fill(selector, text)` | Select the existing text, then type over it; `""` clears. Throws when the click did not focus the element. |
-| `selectOption(selector, value)` / `selectOption(selector, { label })` | Pick an `<option>` by value or label. Returns the value. |
+| `selectOption(selector, value)` / `selectOption(selector, { label })` | Pick an `<option>` by value or label with real clicks and keys. Returns the value. Throws if the option or the select can't be picked. |
 | `scroll({ deltaX, deltaY, duration })` | Animated scroll. |
 | `scrollIntoView(selector, { behavior })`, `scrollTo({ x, y, behavior })` | `behavior`: `smooth`, `instant`. |
 | `keyboard.type(text)`, `keyboard.press(key, { modifiers, delay })` | Keys to the focused element. `press("Enter")` submits a form; older pods need the button. |
@@ -178,10 +178,10 @@ and `hover` also take `waitForVisible`, `scrollIntoView`, `preDelay`,
 
 | Method | Description |
 | --- | --- |
-| `captureResponses(...fragments)` | Record responses whose URL contains a fragment. Call before navigating. |
+| `captureResponses(...fragments)` | Record responses whose URL contains a fragment. Call before navigating. Turns on the CDP Network domain for this page until `stopCapturing()`. |
 | `waitForResponse(fragment, { timeout })` | First captured match. `CapturedResponse`: `url`, `status`, `headers`, `body` (`Uint8Array`), `text`, `json()`. |
 | `responses` | Everything captured, oldest first. |
-| `stopCapturing()` | Drop captures, stop recording. |
+| `stopCapturing()` | Drop captures, stop recording, turn the Network domain off. |
 
 ## Dialogs
 

@@ -29,7 +29,6 @@ describe("setup", () => {
     expect(chrome.onSession(sessionId)).toEqual([
       "Page.enable",
       "Page.setLifecycleEventsEnabled",
-      "Network.enable",
       "Fetch.enable",
     ]);
     expect(chrome.calls.find((c) => c.method === "Fetch.enable")?.params).toEqual({
@@ -41,28 +40,23 @@ describe("setup", () => {
     });
   });
 
-  test("a page with nothing to block arms Network and not Fetch", async () => {
-    const { chrome, sessionId } = await start();
-    expect(chrome.onSession(sessionId)).toEqual([
-      "Page.enable",
-      "Page.setLifecycleEventsEnabled",
-      "Network.enable",
-    ]);
-  });
-
   test("a failed setup surfaces on the first command", async () => {
     const chrome = new FakeChrome();
-    chrome.respond("Network.enable", () => ({ error: { message: "nope" } }));
-    await expect(fakeBrowser({ chrome })).rejects.toThrow("Network.enable: nope");
+    chrome.respond("Page.setLifecycleEventsEnabled", () => ({
+      error: { message: "nope" },
+    }));
+    await expect(fakeBrowser({ chrome })).rejects.toThrow(
+      "Page.setLifecycleEventsEnabled: nope",
+    );
     expect(chrome.socket?.closed).toBe(true);
     // a later page's failed setup surfaces on its first command instead
     const { browser, chrome: ours } = await start();
-    ours.respond("Network.enable", (_p, sessionId) =>
+    ours.respond("Page.setLifecycleEventsEnabled", (_p, sessionId) =>
       sessionId === browser._sessionId ? {} : { error: { message: "nope" } },
     );
     const page = await browser.newPage().catch((e) => e);
     expect(page).toBeInstanceOf(CDPError);
-    expect(page.message).toBe("Network.enable: nope");
+    expect(page.message).toBe("Page.setLifecycleEventsEnabled: nope");
   });
 });
 
@@ -82,10 +76,8 @@ describe("goto", () => {
     });
     await settle();
     expect(settled).toBe(false);
-    chrome.documentResponse(sessionId, "R1", 404);
     chrome.lifecycle(sessionId, "L1", ["init", "commit", "DOMContentLoaded", "load"]);
     await nav;
-    expect(browser.status).toBe(404);
     expect(chrome.calls.find((c) => c.method === "Page.navigate")?.params).toEqual({
       url: "https://x.test",
     });
@@ -152,7 +144,6 @@ describe("goto", () => {
     await expect(browser.goto("https://x.test")).rejects.toThrow(
       "navigation to https://x.test failed: net::ERR_NAME_NOT_RESOLVED",
     );
-    expect(browser.status).toBeUndefined();
     chrome.autoNavigate = false;
     chrome.respond("Page.navigate", () => ({
       loaderId: "L1",
@@ -184,16 +175,6 @@ describe("goto", () => {
     ).resolves.toBeUndefined();
   });
 
-  test("a new goto forgets the last status", async () => {
-    const { browser, chrome, sessionId } = await start();
-    chrome.documentResponse(sessionId, "R1", 200);
-    expect(browser.status).toBe(200);
-    chrome.autoNavigate = false;
-    browser.goto("https://x.test", { timeout: 50 }).catch(() => {});
-    expect(browser.status).toBeUndefined();
-    await settle();
-  });
-
   test("history steps", async () => {
     const { browser, chrome } = await start();
     let current = 1;
@@ -213,9 +194,23 @@ describe("goto", () => {
   });
 });
 
+describe("status", () => {
+  test.each([
+    [404, 404],
+    [0, undefined],
+  ])(
+    "a document whose response status is %s reports %s",
+    async (responseStatus, status) => {
+      const { browser, chrome } = await start();
+      chrome.statuses.set(browser.targetId, responseStatus);
+      expect(await browser.status()).toBe(status);
+    },
+  );
+});
+
 describe("Fetch interception", () => {
-  test("blocks every paused request and reads only the main frame's status", async () => {
-    const { browser, chrome, sessionId } = await start({
+  test("blocks every paused request", async () => {
+    const { chrome, sessionId } = await start({
       blockResources: ["image"],
     });
     chrome.event(
@@ -223,7 +218,6 @@ describe("Fetch interception", () => {
       { requestId: "R1", request: {}, resourceType: "Image" },
       sessionId,
     );
-    chrome.documentResponse(sessionId, "R3", 500, "iframe");
     chrome.event("Fetch.requestPaused", { request: {} }, sessionId);
     await settle();
     expect(
@@ -236,7 +230,6 @@ describe("Fetch interception", () => {
         params: { requestId: "R1", errorReason: "BlockedByClient" },
       },
     ]);
-    expect(browser.status).toBeUndefined();
   });
 });
 
@@ -367,6 +360,269 @@ describe("input", () => {
   });
 });
 
+describe("selectOption", () => {
+  type Box = { x: number; y: number; width: number; height: number };
+  const SELECT_BOX: Box = { x: 10, y: 100, width: 120, height: 20 };
+
+  const selectState = (
+    labels: readonly string[],
+    given: {
+      selected?: string[];
+      disabled?: string[];
+      hidden?: string[];
+      boxes?: Box[];
+      box?: Box;
+    } = {},
+  ): Record<string, unknown> => ({
+    listbox: given.boxes !== undefined,
+    box: given.box ?? SELECT_BOX,
+    viewport: 800,
+    options: labels.map((label, i) => ({
+      value: label.toLowerCase(),
+      label,
+      text: label,
+      selected: given.selected?.includes(label) ?? false,
+      disabled: given.disabled?.includes(label) ?? false,
+      hidden: given.hidden?.includes(label) ?? false,
+      box: given.boxes?.[i] ?? null,
+    })),
+  });
+
+  const selecting = async (
+    ...states: (Record<string, unknown> | (() => unknown))[]
+  ): Promise<FakeBrowser & { human: () => [string, any][] }> => {
+    const started = await start();
+    started.chrome.respond("DOM.querySelector", () => ({ nodeId: 5 }));
+    started.chrome.respond("Runtime.callFunctionOn", (p) => {
+      if (!p.functionDeclaration.includes("listbox")) {
+        return { result: { type: "boolean", value: true } };
+      }
+      const state = states.shift();
+      return typeof state === "function"
+        ? state()
+        : { result: { type: "object", value: state } };
+    });
+    const human = (): [string, any][] =>
+      started.chrome.calls
+        .filter((c) => c.method.startsWith("Human."))
+        .map((c) => [c.method, c.params]);
+    return { ...started, human };
+  };
+
+  const inside = ([, p]: [string, any], box: Box): boolean =>
+    box.x <= p.x && p.x <= box.x + box.width && box.y <= p.y && p.y <= box.y + box.height;
+
+  const FRUIT = ["Choose", "Apple", "Banana", "Cherry"];
+
+  test.each([
+    ["Choose", "Banana", "ArrowDown"],
+    ["Cherry", "Apple", "ArrowUp"],
+  ])("opens the menu and arrows from %s to %s", async (current, goal, key) => {
+    const { browser, human } = await selecting(
+      selectState(FRUIT, { selected: [current] }),
+      selectState(FRUIT, { selected: [goal] }),
+    );
+    expect(await browser.selectOption("#fruit", goal.toLowerCase())).toBe(
+      goal.toLowerCase(),
+    );
+    const [click, ...keys] = human();
+    expect(click![0]).toBe("Human.click");
+    expect(inside(click!, SELECT_BOX)).toBe(true);
+    expect(keys).toEqual([
+      ["Human.press", { key }],
+      ["Human.press", { key }],
+      ["Human.press", { key: "Enter" }],
+    ]);
+  });
+
+  test("returns an option already chosen", async () => {
+    const { browser } = await selecting(selectState(FRUIT, { selected: ["Apple"] }));
+    expect(await browser.selectOption("#fruit", { label: "Apple" })).toBe("apple");
+  });
+
+  test("complains when the page did not take the choice", async () => {
+    const { browser } = await selecting(
+      selectState(FRUIT, { selected: ["Choose"] }),
+      selectState(FRUIT, { selected: ["Choose"] }),
+    );
+    await expect(browser.selectOption("#fruit", "apple")).rejects.toThrow(
+      "'#fruit' did not select 'apple'",
+    );
+  });
+
+  test("returns when the change loads another document", async () => {
+    const gone = { error: { message: "No node with given id found" } };
+    const { browser, chrome, sessionId } = await selecting(
+      selectState(FRUIT, { selected: ["Choose"] }),
+      () => {
+        chrome.lifecycle(sessionId, "next", ["init"]);
+        return gone;
+      },
+      selectState(FRUIT, { selected: ["Choose"] }),
+      () => gone,
+    );
+    expect(await browser.selectOption("#fruit", "apple")).toBe("apple");
+    await expect(browser.selectOption("#fruit", "apple")).rejects.toThrow(
+      "No node with given id found",
+    );
+  });
+
+  test("refuses an option a person cannot choose", async () => {
+    const { browser } = await selecting(
+      selectState(FRUIT, { selected: ["Choose"], disabled: ["Apple"] }),
+    );
+    await expect(browser.selectOption("#fruit", { label: "Apple" })).rejects.toThrow(
+      "'Apple' is disabled or hidden",
+    );
+  });
+
+  test("refuses a select drawn over by a custom widget", async () => {
+    const hidden = { x: 0, y: 0, width: 0, height: 0 };
+    const { browser } = await selecting(
+      selectState(FRUIT, { selected: ["Choose"], box: hidden }),
+    );
+    await expect(browser.selectOption("#fruit", { label: "Apple" })).rejects.toThrow(
+      "'#fruit' is not visible",
+    );
+  });
+
+  const COUNTRIES = [
+    "Choose",
+    "Laos",
+    "Latvia",
+    "Lebanon",
+    "Liberia",
+    "Libya",
+    "Llandudno",
+    "Dominica",
+    "Dominican Republic",
+    "Denmark",
+    "United Arab Emirates",
+    "United Kingdom",
+    "United States",
+  ];
+
+  test.each([
+    ["United Kingdom", "united k", []],
+    ["Llandudno", "lla", []],
+    ["Dominican Republic", "do", ["Dominica"]],
+  ])("types ahead to %s", async (label, typed, disabled) => {
+    const { browser, human } = await selecting(
+      selectState(COUNTRIES, { selected: ["Choose"], disabled }),
+      selectState(COUNTRIES, { selected: [label] }),
+    );
+    expect(await browser.selectOption("#country", { label })).toBe(label.toLowerCase());
+    expect(human().slice(1)).toEqual([
+      ...Array.from(typed, (char) => [
+        "Human.press",
+        { key: char === " " ? "Space" : char },
+      ]),
+      ["Human.press", { key: "Enter" }],
+    ]);
+  });
+
+  test("arrows past options a person cannot choose", async () => {
+    const { browser, human } = await selecting(
+      selectState(COUNTRIES, {
+        selected: ["Choose"],
+        disabled: ["Latvia"],
+        hidden: ["Liberia"],
+      }),
+      selectState(COUNTRIES, { selected: ["Dominica"] }),
+    );
+    expect(await browser.selectOption("#country", { label: "Dominica" })).toBe(
+      "dominica",
+    );
+    expect(human().slice(1)).toEqual([
+      ...Array(5).fill(["Human.press", { key: "ArrowDown" }]),
+      ["Human.press", { key: "Enter" }],
+    ]);
+  });
+
+  const rows = (labels: readonly string[], scrolled = 0): Box[] =>
+    labels.map((_, i) => ({ x: 10, y: 100 + 20 * i - scrolled, width: 120, height: 20 }));
+  const LISTBOX: Box = { x: 10, y: 100, width: 120, height: 60 };
+
+  test("a listbox option in view is clicked", async () => {
+    const tags = ["Red", "Green", "Blue"];
+    const boxes = rows(tags);
+    const { browser, human } = await selecting(
+      selectState(tags, { selected: ["Red", "Blue"], boxes, box: LISTBOX }),
+      selectState(tags, { selected: ["Green"], boxes, box: LISTBOX }),
+    );
+    expect(await browser.selectOption("#tags", "green")).toBe("green");
+    const [click, ...rest] = human();
+    expect(rest).toEqual([]);
+    expect(click![0]).toBe("Human.click");
+    expect(inside(click!, boxes[1]!)).toBe(true);
+  });
+
+  test("a listbox is scrolled to an option out of view", async () => {
+    const tags = ["Red", "Green", "Blue", "Cyan", "Pink"];
+    const scrolled = rows(tags, 40);
+    const { browser, human } = await selecting(
+      selectState(tags, { boxes: rows(tags), box: LISTBOX }),
+      selectState(tags, { boxes: scrolled, box: LISTBOX }),
+      selectState(tags, { selected: ["Pink"], boxes: scrolled, box: LISTBOX }),
+    );
+    expect(await browser.selectOption("#tags", "pink")).toBe("pink");
+    const [move, scroll, click] = human();
+    expect(move![0]).toBe("Human.moveTo");
+    expect(inside(move!, LISTBOX)).toBe(true);
+    expect(scroll).toEqual(["Human.scroll", { deltaY: 60 }]);
+    expect(click![0]).toBe("Human.click");
+    expect(inside(click!, scrolled[4]!)).toBe(true);
+  });
+
+  test("the page is scrolled to a select below the fold", async () => {
+    const sizes = ["S", "M"];
+    const { browser, human } = await selecting(
+      selectState(sizes, { selected: ["S"], box: { ...SELECT_BOX, y: 1700 } }),
+      selectState(sizes, { selected: ["S"] }),
+      selectState(sizes, { selected: ["M"] }),
+    );
+    expect(await browser.selectOption("#size", "m")).toBe("m");
+    const [scroll, click] = human();
+    expect(scroll).toEqual(["Human.scroll", { deltaY: 1310 }]);
+    expect(click![0]).toBe("Human.click");
+    expect(inside(click!, SELECT_BOX)).toBe(true);
+  });
+
+  test("takes an XPath selector", async () => {
+    const regions = ["Asia", "Europe"];
+    const { browser, chrome, human } = await selecting(
+      selectState(regions, { selected: ["Asia"] }),
+      selectState(regions, { selected: ["Europe"] }),
+    );
+    chrome.respond("DOM.performSearch", () => ({ searchId: "s", resultCount: 1 }));
+    chrome.respond("DOM.getSearchResults", () => ({ nodeIds: [9] }));
+    chrome.respond("DOM.discardSearchResults", () => ({}));
+    expect(await browser.selectOption("//select[@id='region']", "europe")).toBe("europe");
+    expect(chrome.called("DOM.resolveNode").at(-1)?.params).toEqual({
+      nodeId: 9,
+      executionContextId: 7,
+    });
+    expect(human().slice(1)).toEqual([
+      ["Human.press", { key: "ArrowDown" }],
+      ["Human.press", { key: "Enter" }],
+    ]);
+  });
+
+  test("a missing option, a missing select and no choice complain", async () => {
+    const { browser, chrome } = await selecting(selectState(["Asia"]));
+    await expect(browser.selectOption("#region", { label: "Europe" })).rejects.toThrow(
+      "'#region' has no option 'Europe'",
+    );
+    await expect(browser.selectOption("#region", {})).rejects.toThrow(
+      /either a value or a label/,
+    );
+    chrome.respond("DOM.querySelector", () => ({ nodeId: 0 }));
+    await expect(browser.selectOption("#region", "eu")).rejects.toThrow(
+      "nothing matches '#region'",
+    );
+  });
+});
+
 describe("reading", () => {
   test("text, attributes, counts, html", async () => {
     const { browser, chrome } = await start();
@@ -400,30 +656,6 @@ describe("reading", () => {
     chrome.targets.get(browser.targetId)!.url = "https://u.test";
     expect(await browser.title()).toBe("T");
     expect(await browser.url()).toBe("https://u.test");
-  });
-
-  test("selectOption by value or label", async () => {
-    const { browser, chrome } = await start();
-    chrome.respond("DOM.querySelector", (p) => ({
-      nodeId: p.selector === "#gone" ? 0 : 5,
-    }));
-    chrome.respond("Runtime.callFunctionOn", (p) => {
-      const args = p.arguments.map((a: { value: unknown }) => a.value);
-      if (args[0] === "x" || args[1] === "x")
-        return { result: { type: "boolean", value: false } };
-      return { result: { type: "string", value: args[0] ?? "from-label" } };
-    });
-    expect(await browser.selectOption("select", "v1")).toBe("v1");
-    expect(await browser.selectOption("select", { label: "One" })).toBe("from-label");
-    await expect(browser.selectOption("select", {})).rejects.toThrow(
-      /either a value or a label/,
-    );
-    await expect(browser.selectOption("#gone", "v")).rejects.toThrow(
-      "nothing matches '#gone'",
-    );
-    await expect(browser.selectOption("select", "x")).rejects.toThrow(
-      "'select' has no option 'x'",
-    );
   });
 
   test("innerText runs on the node the lookup found, and takes XPath", async () => {
@@ -491,24 +723,6 @@ describe("reading", () => {
     await expect(browser.innerText("h1")).rejects.toThrow(
       "does not belong to the document",
     );
-  });
-
-  test("selectOption takes an XPath selector", async () => {
-    const { browser, chrome } = await start();
-    chrome.respond("DOM.performSearch", () => ({
-      searchId: "s",
-      resultCount: 1,
-    }));
-    chrome.respond("DOM.getSearchResults", () => ({ nodeIds: [9] }));
-    chrome.respond("DOM.discardSearchResults", () => ({}));
-    chrome.respond("Runtime.callFunctionOn", () => ({
-      result: { type: "string", value: "eu" },
-    }));
-    expect(await browser.selectOption("//select[@id='region']", "eu")).toBe("eu");
-    expect(chrome.called("DOM.resolveNode").at(-1)?.params).toEqual({
-      nodeId: 9,
-      executionContextId: 7,
-    });
   });
 
   const searching = (chrome: FakeChrome, keep: number): void => {
@@ -895,7 +1109,7 @@ describe("network capture", () => {
     );
     await browser.stopCapturing();
     await browser.stopCapturing();
-    expect(chrome.called("Network.disable")).toHaveLength(0); // on for the status
+    expect(chrome.called("Network.disable")).not.toHaveLength(0);
     expect(browser.responses).toEqual([]);
   });
 
@@ -914,6 +1128,23 @@ describe("network capture", () => {
     const got = await browser.waitForResponse("/x");
     expect(got.body).toHaveLength(0);
     expect(got.text).toBe("");
+  });
+
+  test("a closed page stops capturing without throwing", async () => {
+    const { browser, chrome } = await start();
+    const page = await browser.newPage();
+    await page.captureResponses("/api/");
+    chrome.detach(page._sessionId);
+    await page.stopCapturing();
+    await expect(page.waitForResponse("/api/")).rejects.toThrow(/captureResponses/);
+  });
+
+  test("a capture whose enable timed out is still stopped", async () => {
+    const { browser, chrome } = await start({ commandTimeout: 50 });
+    chrome.hangs.add("Network.enable");
+    await expect(browser.captureResponses("/api/")).rejects.toThrow(BrowserTimeoutError);
+    await browser.stopCapturing();
+    expect(chrome.called("Network.disable")).not.toHaveLength(0);
   });
 });
 

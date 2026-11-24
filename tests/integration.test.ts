@@ -25,9 +25,9 @@ test("client.map runs every url through the real pool, browser and CDP client", 
         target.url = params.url;
         target.title = `Title of ${params.url}`;
       }
+      chrome.statuses.set(targetId, 200);
       const loaderId = chrome.newLoaderId();
       queueMicrotask(() => {
-        chrome.documentResponse(sessionId ?? "", `R-${loaderId}`, 200);
         chrome.lifecycle(sessionId ?? "", loaderId, [
           "init",
           "commit",
@@ -47,7 +47,7 @@ test("client.map runs every url through the real pool, browser and CDP client", 
       await browser.goto(url, { waitUntil: "domcontentloaded" });
       return {
         title: await browser.title(),
-        status: browser.status,
+        status: await browser.status(),
         id: browser.internalUuid,
       };
     },

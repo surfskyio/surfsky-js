@@ -52,7 +52,6 @@ describe("connect", () => {
     expect(chrome.onSession("S-T1")).toEqual([
       "Page.enable",
       "Page.setLifecycleEventsEnabled",
-      "Network.enable",
       "Runtime.runIfWaitingForDebugger",
     ]);
   });
@@ -231,7 +230,6 @@ describe("pages", () => {
     expect(chrome.onSession(page._sessionId)).toEqual([
       "Page.enable",
       "Page.setLifecycleEventsEnabled",
-      "Network.enable",
       "Runtime.runIfWaitingForDebugger",
     ]);
     await page.goto("https://x.test");
@@ -280,14 +278,33 @@ describe("pages", () => {
     expect(warned).toEqual(["page target gone for sess-1"]);
   });
 
-  test("events are routed by session", async () => {
-    const { browser, chrome, sessionId } = await start();
+  test("a page reports its own status", async () => {
+    const { browser, chrome } = await start();
     const page = await browser.newPage();
-    chrome.documentResponse(page._sessionId, "R1", 201);
-    expect(page.status).toBe(201);
-    expect(browser.status).toBeUndefined();
-    chrome.documentResponse(sessionId, "R2", 200);
-    expect(browser.status).toBe(200);
+    chrome.statuses.set(page.targetId, 503);
+    expect([await page.status(), await browser.status()]).toEqual([503, undefined]);
+  });
+
+  test("a page captures its own responses", async () => {
+    const { browser, chrome } = await start();
+    const page = await browser.newPage();
+    await page.captureResponses("/api/");
+    expect(chrome.called("Network.enable").map((c) => c.sessionId)).toContain(
+      page._sessionId,
+    );
+    chrome.event(
+      "Network.responseReceived",
+      { requestId: "R1", response: { url: "https://x/api/a", status: 201 } },
+      page._sessionId,
+    );
+    chrome.event("Network.loadingFinished", { requestId: "R1" }, page._sessionId);
+    expect((await page.waitForResponse("/api/")).status).toBe(201);
+    expect(browser.responses).toEqual([]);
+  });
+
+  test("events are routed by session", async () => {
+    const { browser, chrome } = await start();
+    const page = await browser.newPage();
     chrome.event("Fetch.requestPaused", { requestId: "R3" }, page._sessionId);
     chrome.event("Fetch.requestPaused", { requestId: "R4" }, "S-unknown");
     await settle();
@@ -345,7 +362,6 @@ describe("lifetime", () => {
     chrome.targets.clear();
     await browser.connect();
     expect(browser.onDialog).toBe(handler);
-    expect(browser.status).toBeUndefined();
     expect(browser.connected).toBe(true);
     expect(browser.pages).toHaveLength(1);
   });

@@ -212,7 +212,11 @@ describe("lease", () => {
       return page;
     });
     expect(page.closed).toBe(true);
-    const browser = await p.lease(async (browser) => browser);
+    expect(r.chromes[0]?.called("Network.disable")).not.toHaveLength(0);
+    const browser = await p.lease(async (browser) => {
+      await expect(browser.waitForResponse("/x")).rejects.toThrow(/captureResponses/);
+      return browser;
+    });
     expect(browser.pages).toHaveLength(1);
     expect(browser.onDialog).toBeNull();
     expect(browser.responses).toEqual([]);
